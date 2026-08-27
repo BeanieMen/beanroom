@@ -1,5 +1,11 @@
 import { readFileSync } from "fs";
 import { Server, type ClientInfo, type Connection } from "ssh2";
+import { colors } from "./config";
+import {
+  getTerminalColorSupport,
+  RichWriteLine,
+  type ColorSupportLevel,
+} from "./helper";
 
 const serverKey = readFileSync("ssh_host_ed25519_key");
 
@@ -15,14 +21,11 @@ const sshServer = new Server(
 
       switch (ctx.method) {
         case "none":
-          // Tell the client which authentication methods are available.
           ctx.reject(["publickey"]);
           break;
 
         case "publickey":
           console.log(`Public key authentication for user: ${ctx.username}`);
-
-          // Accept the key.
           ctx.accept();
           break;
 
@@ -34,23 +37,38 @@ const sshServer = new Server(
 
     client.on("ready", () => {
       console.log("Client authenticated!");
+
       client.on("session", (accept, reject) => {
         const session = accept();
+        let colorSupport: ColorSupportLevel = 1;
 
-        session.on("pty", (accept, reject) => {
-            console.log("PTY requested - rejecting");
-            reject();
-        })
+        session.on("pty", (accept, reject, info) => {
+          const ptyInfo = info as typeof info & { term: string };
+          colorSupport = getTerminalColorSupport(ptyInfo.term);
+          console.log(
+            `PTY requested with term: ${ptyInfo.term}, color support level: ${colorSupport}`,
+          );
+          accept();
+        });
+
         session.on("shell", (accept, reject) => {
           const shell = accept();
           console.log("Shell requested");
 
-          shell.write("Welcome to the SSH server!\n");
-          shell.write(`Current user: ${info.ip}\n`);
+          // Render styled border using VS Code compatible hex values
+          RichWriteLine(
+            shell,
+            "╔══════════════════╗\r\n║     BEANROOM     ║\r\n╚══════════════════╝",
+            {
+              colorLevel: colorSupport,
+              gradient: ["#ff007f", "#9d00ff", "#00f0ff"], // Pink -> Purple -> Cyan
+            },
+          );
 
           shell.on("data", (data: Buffer) => {
             console.log(`Received data from client: ${data.toString()}`);
           });
+
           shell.on("close", () => {
             console.log("Shell closed");
           });

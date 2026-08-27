@@ -1,15 +1,17 @@
 {
-  "name": "ssh-chatroom",
+  "name": "beanroom",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/gradient-string": "^1.1.6",
     "@types/node": "^26.4.0",
     "@types/ssh2": "^1.15.5",
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "gradient-string": "^3.0.0",
     "ssh2": "^1.17.0"
   }
 }
