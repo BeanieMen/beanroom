@@ -1,15 +1,14 @@
 import { readFileSync } from "fs";
-import { Server, type ClientInfo, type Connection } from "ssh2";
-import { colors } from "./config";
+import { Server, type ClientInfo, type Connection, type ServerChannel } from "ssh2";
+import { ChatRoom } from "./chatroom";
 import {
   getTerminalColorSupport,
   RichWriteLine,
   type ColorSupportLevel,
 } from "./helper";
-import { getMachineNameFromKeyContext } from "./helpers.ts/name";
+import { getCombinedUsername } from "./helpers.ts/name";
 
 const serverKey = readFileSync("ssh_host_ed25519_key");
-const clientIdentities = new Map<any, string>();
 
 const sshServer = new Server(
   {
@@ -17,7 +16,8 @@ const sshServer = new Server(
   },
   (client: Connection, info: ClientInfo) => {
     console.log(`Client connected: ${info.ip}`);
-    let clientMachineName = "Unknown";
+    let clientMachineName = "Guest";
+
     client.on("authentication", (ctx) => {
       console.log(`Authentication attempt: ${ctx.method}`);
 
@@ -28,10 +28,9 @@ const sshServer = new Server(
 
         case "publickey":
           console.log(`Public key authentication for user: ${ctx.username}`);
-          
+          clientMachineName = getCombinedUsername(ctx.username, ctx.key.data);
+          console.log(`Identified machine: ${clientMachineName}`);
           ctx.accept();
-          clientMachineName = getMachineNameFromKeyContext(ctx.key);
-          console.log(clientMachineName);
           break;
 
         default:
@@ -43,45 +42,95 @@ const sshServer = new Server(
     client.on("ready", () => {
       console.log("Client authenticated!");
 
-      client.on("session", (accept, reject) => {
+      client.on("session", (accept) => {
         const session = accept();
         let colorSupport: ColorSupportLevel = 1;
 
-        session.on("pty", (accept, reject, info) => {
+        session.on("pty", (accept, _, info) => {
           const ptyInfo = info as typeof info & { term: string };
           colorSupport = getTerminalColorSupport(ptyInfo.term);
           console.log(
             `PTY requested with term: ${ptyInfo.term}, color support level: ${colorSupport}`,
           );
-          accept();
+          if (accept) accept();
         });
 
-        session.on("shell", (accept, reject) => {
-          const shell = accept();
+        session.on("shell", (accept) => {
+          const shell: ServerChannel = accept();
           console.log("Shell requested");
 
-          // Render styled border using VS Code compatible hex values
+          // Render styled border
           RichWriteLine(
             shell,
             "╔══════════════════╗\r\n║     BEANROOM     ║\r\n╚══════════════════╝",
             {
               colorLevel: colorSupport,
-              gradient: ["#ff007f", "#9d00ff", "#00f0ff"], // Pink -> Purple -> Cyan
+              gradient: ["#ff007f", "#9d00ff", "#00f0ff"],
             },
           );
 
-          shell.on("data", (data: Buffer) => {
-            console.log(`Received data from client: ${data.toString()}`);
+          const userId = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+          // Add user to the ChatRoom instance
+          chatRoom.join({
+            id: userId,
+            name: clientMachineName,
+            client,
+            shell,
+            colorLevel: colorSupport,
+            joinedAt: new Date(),
           });
 
+          let inputBuffer = "";
+
+          // Handle raw terminal character input
+          shell.on("data", (data: Buffer) => {
+            const str = data.toString("utf-8");
+
+            for (let i = 0; i < str.length; i++) {
+              const char = str[i];
+              if (char === undefined) continue; // Guard against undefined under strict null checks
+
+              // Enter key (\r or \n)
+              if (char === "\r" || char === "\n") {
+                shell.write("\r\n");
+                
+                // Broadcast non-empty input
+                if (inputBuffer.trim().length > 0) {
+                  chatRoom.broadcast(inputBuffer.trim(), userId);
+                }
+                
+                inputBuffer = "";
+                shell.write(`${clientMachineName} > `);
+              }
+              // Backspace key (\x7f or \x08)
+              else if (char === "\x7f" || char === "\x08") {
+                if (inputBuffer.length > 0) {
+                  inputBuffer = inputBuffer.slice(0, -1);
+                  shell.write("\b \b");
+                }
+              }
+              // Printable characters
+              else if (char >= " ") {
+                inputBuffer += char;
+                shell.write(char); // Local terminal echo
+              }
+            }
+          });
+
+          // Handle client disconnect
           shell.on("close", () => {
             console.log("Shell closed");
+            chatRoom.leave(userId);
           });
         });
       });
     });
   },
 );
+
+// Instantiate ChatRoom with the SSH Server
+const chatRoom = new ChatRoom(sshServer);
 
 sshServer.listen(2222, "127.0.0.1", () => {
   console.log("SSH Server listening on port 2222...");
