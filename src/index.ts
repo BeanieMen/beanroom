@@ -6,8 +6,10 @@ import {
   RichWriteLine,
   type ColorSupportLevel,
 } from "./helper";
+import { getMachineNameFromKeyContext } from "./helpers.ts/name";
 
 const serverKey = readFileSync("ssh_host_ed25519_key");
+const clientIdentities = new Map<any, string>();
 
 const sshServer = new Server(
   {
@@ -15,7 +17,7 @@ const sshServer = new Server(
   },
   (client: Connection, info: ClientInfo) => {
     console.log(`Client connected: ${info.ip}`);
-
+    let clientMachineName = "Unknown";
     client.on("authentication", (ctx) => {
       console.log(`Authentication attempt: ${ctx.method}`);
 
@@ -26,7 +28,10 @@ const sshServer = new Server(
 
         case "publickey":
           console.log(`Public key authentication for user: ${ctx.username}`);
+          
           ctx.accept();
+          clientMachineName = getMachineNameFromKeyContext(ctx.key);
+          console.log(clientMachineName);
           break;
 
         default:
