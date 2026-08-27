@@ -9,13 +9,24 @@ import { ChatRoom, type UserSession } from "./chatroom";
 import {
   getTerminalColorSupport,
   getUsernameColor,
+  RichWrite,
   RichWriteLine,
   type ColorSupportLevel,
 } from "./helper";
 import { getCombinedUsername } from "./helpers.ts/name";
+import { handleCommand } from "./commands/handler";
+import { User } from "./user";
 
 const serverKey = readFileSync("ssh_host_ed25519_key");
 
+function setupFullTerminalScreen(shell: ServerChannel, rows: number) {
+  shell.write(
+    "\x1b[?1049h" + // Enter alternate screen buffer (full screen mode)
+      "\x1b[2J" + // Clear entire screen
+      `\x1b[1;${rows - 1}r` + // Define scroll region: Row 1 to (rows - 1)
+      `\x1b[${rows};1H`, // Position cursor at bottom row
+  );
+}
 const sshServer = new Server(
   {
     hostKeys: [serverKey],
@@ -51,32 +62,58 @@ const sshServer = new Server(
       client.on("session", (accept) => {
         const session = accept();
         let colorSupport: ColorSupportLevel = 1;
-
+        let termRows = 24;
+        let termCols = 80;
         session.on("pty", (accept, _, info) => {
           const ptyInfo = info as typeof info & { term: string };
           colorSupport = getTerminalColorSupport(ptyInfo.term);
+          if (ptyInfo.rows && ptyInfo.cols) {
+            termRows = ptyInfo.rows;
+            termCols = ptyInfo.cols;
+          }
           console.log(
             `PTY requested with term: ${ptyInfo.term}, color support level: ${colorSupport}`,
           );
           if (accept) accept();
         });
 
+        session.on("window-change", (accept, _, info) => {
+          if (info) {
+            termRows = info.rows;
+            termCols = info.cols;
+            console.log(
+              `Window size changed: ${termRows} rows, ${termCols} cols`,
+            );
+            setupFullTerminalScreen(session, termRows);
+            chatROom.promptUser(userSession
+          }
+        });
         session.on("shell", (accept) => {
           const shell: ServerChannel = accept();
           console.log("Shell requested");
 
           // Render styled gradient banner
+          RichWriteLine(shell, "╔══════════════════╗", {
+            colorLevel: colorSupport,
+            gradient: ["#ff007f", "#9d00ff", "#00f0ff"],
+          });
+          RichWrite(shell, "║", {
+            colorLevel: colorSupport,
+            gradient: ["#ff007f", "#9d00ff", "#00f0ff"],
+          });
+          RichWrite(shell, "     BEANROOM     ");
+          RichWrite(shell, "║\r\n", {
+            colorLevel: colorSupport,
+            gradient: ["#00f0ff", "#9d00ff", "#ff007f"],
+          });
+
+          RichWriteLine(shell, "╚══════════════════╝\r\n", {
+            colorLevel: colorSupport,
+            gradient: ["#ff007f", "#9d00ff", "#00f0ff"],
+          });
           RichWriteLine(
             shell,
-            "╔══════════════════╗\r\n║     BEANROOM     ║\r\n╚══════════════════╝",
-            {
-              colorLevel: colorSupport,
-              gradient: ["#ff007f", "#9d00ff", "#00f0ff"],
-            },
-          );
-          RichWriteLine(
-            shell,
-            "🐱🐱 HEY!!~ You there! Welcome to wtv this is idk. chat with other people and be nice",
+            "🐱🐱 HEY!!~ You there! Welcome to wtv this is idk. chat with other people and be nice\r\nalso do a /register 'username' and 'password' to have your preferences saved",
             { colorLevel: colorSupport, color: "#5b9fff" },
           );
 
@@ -84,7 +121,7 @@ const sshServer = new Server(
 
           const userSession: UserSession = {
             id: userId,
-            name: clientMachineName,
+            user: new User(clientMachineName),
             client,
             shell,
             colorLevel: colorSupport,
@@ -108,16 +145,20 @@ const sshServer = new Server(
               // Enter key (\r or \n)
               if (char === "\r" || char === "\n") {
                 shell.write("\r\n");
-
-                if (inputBuffer.trim().length > 0) {
-                  chatRoom.broadcast(inputBuffer.trim(), userId);
+                const message = inputBuffer.trim();
+                if (message.startsWith("/")) {
+                  // Handle command
+                  handleCommand(userSession, message);
+                } else if (message.length > 0) {
+                  // Broadcast message to other users
+                  chatRoom.broadcast(message, userId);
                 }
-
                 inputBuffer = "";
 
                 // Re-render gradient prompt for the sender via chatRoom
                 chatRoom.promptUser(userSession);
               }
+
               // Backspace key (\x7f or \x08)
               else if (char === "\x7f" || char === "\x08") {
                 if (inputBuffer.length > 0) {
@@ -141,7 +182,6 @@ const sshServer = new Server(
           // Handle client disconnect
           shell.on("close", () => {
             console.log("Shell closed");
-            chatRoom.leave(userId);
           });
         });
       });

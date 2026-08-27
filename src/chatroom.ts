@@ -1,18 +1,18 @@
 import { Server, type ServerChannel, type Connection } from "ssh2";
 import { getUsernameColor, RichWrite, RichWriteLine, type ColorSupportLevel } from "./helper";
 import { colors } from "./config";
-import { writeFile, existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import type { User } from "./user";
 
 export interface UserSession {
   id: string;
-  name: string;
   client: Connection;
   shell: ServerChannel;
   colorLevel: ColorSupportLevel;
   joinedAt: Date;
   usernameGradient: [string, string]; // Gradient colors for the username
+  user: User;
 }
-
 
 export interface LogEntry {
   sender: string;
@@ -20,9 +20,18 @@ export interface LogEntry {
   timestamp: string;
 }
 
+/**
+ * Returns a formatted time string like "[14:05]"
+ */
+function getTimestamp(date = new Date()): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `[${hours}:${minutes}]`;
+}
+
 export class ChatRoom {
   private server: Server;
-  private users: Map<string, UserSession > = new Map();
+  private users: Map<string, UserSession> = new Map();
   private logFile = "chatlog.txt";
 
   constructor(server: Server) {
@@ -39,9 +48,7 @@ export class ChatRoom {
       timestamp: new Date().toISOString(),
     };
 
-    writeFile(this.logFile, JSON.stringify(entry) + "\n", { flag: "a" }, (err) => {
-      if (err) console.error("Error writing to chatlog.txt", err);
-    });
+    writeFileSync(this.logFile, JSON.stringify(entry) + "\n", { flag: "a" });
   }
 
   /**
@@ -58,9 +65,10 @@ export class ChatRoom {
       for (const line of lines) {
         if (!line) continue;
         const entry: LogEntry = JSON.parse(line);
+        const timeStr = getTimestamp(new Date(entry.timestamp));
 
         if (entry.sender === "system") {
-          RichWriteLine(session.shell, entry.message, {
+          RichWriteLine(session.shell, `\x1b[90m${timeStr}\x1b[30m${entry.message}`, {
             colorLevel: session.colorLevel,
             color: colors.log,
           });
@@ -81,17 +89,23 @@ export class ChatRoom {
    * Registers a connected client/session, replays history, and broadcasts arrival.
    */
   public join(session: UserSession): void {
-    this.users.set(session.id, { ...session, usernameGradient: getUsernameColor(session.name) });
+    const sessionData: UserSession = {
+      ...session,
+      usernameGradient: getUsernameColor(session.user.name),
+    };
+    this.users.set(session.id, sessionData);
 
-    this.replayHistory(session, 10);
+    this.replayHistory(sessionData, 10);
 
-    const joinMsg = `* ${session.name} has joined the chat.`;
+    const joinMsg = `${session.user.name} has joined the chat.`;
     this.logEvent("system", joinMsg);
+
+    const timeStr = getTimestamp();
 
     this.users.forEach((user) => {
       if (user.id !== session.id) {
         user.shell.write("\r\x1b[K"); // Clear existing prompt line
-        RichWriteLine(user.shell, joinMsg, {
+        RichWriteLine(user.shell, `\x1b[90m${timeStr}\x1b[0m ${joinMsg}`, {
           colorLevel: user.colorLevel,
           color: colors.log,
         });
@@ -99,8 +113,8 @@ export class ChatRoom {
       }
     });
 
-    // 4. Render gradient prompt for the joining user
-    this.promptUser(session);
+    // Render gradient prompt for the joining user
+    this.promptUser(sessionData);
   }
 
   /**
@@ -111,13 +125,14 @@ export class ChatRoom {
     if (!session) return;
 
     this.users.delete(userId);
-    const leaveMsg = `* ${session.name} has left the chat.`;
+    const leaveMsg = `${session.user.name} has left the chat.`;
     this.logEvent("system", leaveMsg);
-		
+
+    const timeStr = getTimestamp();
 
     this.users.forEach((user) => {
       user.shell.write("\r\x1b[K");
-      RichWriteLine(user.shell, leaveMsg, {
+      RichWriteLine(user.shell, `\x1b[90m${timeStr}\x1b[0m ${leaveMsg}`, {
         colorLevel: user.colorLevel,
         color: colors.log,
       });
@@ -133,8 +148,10 @@ export class ChatRoom {
 
     // Save message to log file
     if (sender) {
-      this.logEvent(sender.name, message);
+      this.logEvent(sender.user.name, message);
     }
+
+    const timeStr = getTimestamp();
 
     for (const [id, session] of this.users.entries()) {
       if (id === senderId) continue; // Skip sender
@@ -143,13 +160,14 @@ export class ChatRoom {
       session.shell.write("\r\x1b[K");
 
       if (sender) {
-        RichWrite(session.shell, `<${sender.name}> `, {
+        session.shell.write(`\x1b[90m${timeStr}\x1b[0m `);
+        RichWrite(session.shell, `${sender.user.name} `, {
           colorLevel: session.colorLevel,
-          gradient: session.usernameGradient,
+          gradient: sender.usernameGradient,
         });
         session.shell.write(`${message}\r\n`);
       } else {
-        RichWriteLine(session.shell, message, {
+        RichWriteLine(session.shell, `\x1b[90m${timeStr}\x1b[0m ${message}`, {
           colorLevel: session.colorLevel,
           color: "\x1b[33m",
         });
@@ -168,7 +186,7 @@ export class ChatRoom {
    * Continuous gradient prompt renderer.
    */
   public promptUser(session: UserSession): void {
-    RichWrite(session.shell, `${session.name} > `, {
+    RichWrite(session.shell, `${session.user.name} > `, {
       colorLevel: session.colorLevel,
       gradient: session.usernameGradient,
     });
