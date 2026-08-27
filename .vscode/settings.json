@@ -1,0 +1,12 @@
+{
+  // Use the workspace TypeScript version (from node_modules) instead of VS Code's bundled version
+  // This is the #1 reason "cannot find module" / "no typings" appears in VS Code
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // Ensure TS discovers Bun + Node typings
+  "typescript.preferences.includePackageJsonAutoImports": "on",
+
+  // Optional: restart TS server after config changes
+  "editor.defaultFormatter": "vscode.typescript-language-features"
+}
