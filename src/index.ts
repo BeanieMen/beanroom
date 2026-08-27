@@ -1,8 +1,14 @@
 import { readFileSync } from "fs";
-import { Server, type ClientInfo, type Connection, type ServerChannel } from "ssh2";
-import { ChatRoom } from "./chatroom";
+import {
+  Server,
+  type ClientInfo,
+  type Connection,
+  type ServerChannel,
+} from "ssh2";
+import { ChatRoom, type UserSession } from "./chatroom";
 import {
   getTerminalColorSupport,
+  getUsernameColor,
   RichWriteLine,
   type ColorSupportLevel,
 } from "./helper";
@@ -59,7 +65,7 @@ const sshServer = new Server(
           const shell: ServerChannel = accept();
           console.log("Shell requested");
 
-          // Render styled border
+          // Render styled gradient banner
           RichWriteLine(
             shell,
             "╔══════════════════╗\r\n║     BEANROOM     ║\r\n╚══════════════════╝",
@@ -68,18 +74,26 @@ const sshServer = new Server(
               gradient: ["#ff007f", "#9d00ff", "#00f0ff"],
             },
           );
+          RichWriteLine(
+            shell,
+            "🐱🐱 HEY!!~ You there! Welcome to wtv this is idk. chat with other people and be nice",
+            { colorLevel: colorSupport, color: "#5b9fff" },
+          );
 
           const userId = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-          // Add user to the ChatRoom instance
-          chatRoom.join({
+          const userSession: UserSession = {
             id: userId,
             name: clientMachineName,
             client,
             shell,
             colorLevel: colorSupport,
             joinedAt: new Date(),
-          });
+            usernameGradient: getUsernameColor(clientMachineName),
+          };
+
+          // Register user in the chatroom
+          chatRoom.join(userSession);
 
           let inputBuffer = "";
 
@@ -89,19 +103,20 @@ const sshServer = new Server(
 
             for (let i = 0; i < str.length; i++) {
               const char = str[i];
-              if (char === undefined) continue; // Guard against undefined under strict null checks
+              if (char === undefined) continue;
 
               // Enter key (\r or \n)
               if (char === "\r" || char === "\n") {
                 shell.write("\r\n");
-                
-                // Broadcast non-empty input
+
                 if (inputBuffer.trim().length > 0) {
                   chatRoom.broadcast(inputBuffer.trim(), userId);
                 }
-                
+
                 inputBuffer = "";
-                shell.write(`${clientMachineName} > `);
+
+                // Re-render gradient prompt for the sender via chatRoom
+                chatRoom.promptUser(userSession);
               }
               // Backspace key (\x7f or \x08)
               else if (char === "\x7f" || char === "\x08") {
@@ -109,11 +124,16 @@ const sshServer = new Server(
                   inputBuffer = inputBuffer.slice(0, -1);
                   shell.write("\b \b");
                 }
+              } else if (char === "\x03") {
+                // Ctrl+C
+                shell.write("\r\n");
+                chatRoom.leave(userId);
+                shell.end();
               }
               // Printable characters
               else if (char >= " ") {
                 inputBuffer += char;
-                shell.write(char); // Local terminal echo
+                shell.write(char); // Echo character to terminal
               }
             }
           });
