@@ -24,6 +24,7 @@ import {
 
 import type { ChatRoom } from "../chat/chatroom.js";
 import type { UserSession } from "../types/session.js";
+import { createHash } from "crypto";
 
 export function createSshServer(
   hostKeys: Buffer[],
@@ -35,17 +36,25 @@ export function createSshServer(
     let machineName = "Guest";
 
     client.on("authentication", (context: AuthContext) => {
-      if (context.method !== "publickey") {
-        activeLogger.debug(`[server] auth reject (method=${context.method})`);
-        context.reject(["publickey"]);
-        return;
-      }
       try {
-        const publicKey = context as AuthContext & { username: string; key: { data: Buffer } };
-        machineName = getCombinedUsername(publicKey.username, publicKey.key.data);
+        const publicKey = context as AuthContext & {
+          username: string;
+          key: { data: Buffer };
+        };
+        console.log(publicKey);
+        const identity = publicKey.key?.data
+          ? publicKey.key.data
+          : Buffer.from(`${publicKey.username}:${info.ip}`);
+
+        machineName = getCombinedUsername(
+          publicKey.username,
+          createHash("sha256").update(identity).digest(),
+        );
+
         activeLogger.info(
           `[server] auth accept user=${publicKey.username} -> machine=${machineName}`,
         );
+
         context.accept();
       } catch {
         activeLogger.warn(`[server] auth error for username=${context.username}`);
