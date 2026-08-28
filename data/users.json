@@ -1,0 +1,9 @@
+{
+  "users": [
+    {
+      "username": "beanie",
+      "passwordHash": "$2a$12$x2.uCBM/K30UevlmXx9S9OXUKpk5ERELqzZ.QEgFj5.4rayBSBgTO",
+      "createdAt": "2026-08-28T15:25:12.592Z"
+    }
+  ]
+}

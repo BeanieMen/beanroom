@@ -1,4 +1,9 @@
+import { logger } from "../helpers/logger.js";
+
+import channels from "./channels.js";
+import color from "./color.js";
 import help from "./help.js";
+import join from "./join.js";
 import login from "./login.js";
 import { reply } from "./output.js";
 import register from "./register.js";
@@ -9,12 +14,15 @@ import type { UserSession } from "../types/session.js";
 export type CommandHandler = (session: UserSession, args: string[]) => void | Promise<void>;
 
 export const commands: Record<string, CommandHandler> = {
+  channels,
   clear: clearCommand,
   help,
-  login: login as unknown as CommandHandler,
+  join,
+  login,
   logout: logoutCommand,
-  register: register as unknown as CommandHandler,
+  register,
   whoami: whoamiCommand,
+  color,
 };
 
 export async function handleCommand(session: UserSession, message: string): Promise<void> {
@@ -33,9 +41,14 @@ export async function handleCommand(session: UserSession, message: string): Prom
 
   const command = commands[commandName];
   if (command === undefined) {
+    logger.debug(`[handler] unknown command "${commandName}" from session=${session.id}`);
     reply(session, `Unknown command: /${commandName}. Try /help`);
     return;
   }
 
+  logger.debug(
+    `[handler] session=${session.id} executing /${commandName} args=${JSON.stringify(args)}`,
+  );
   await command(session, args);
+  logger.debug(`[handler] session=${session.id} finished /${commandName}`);
 }

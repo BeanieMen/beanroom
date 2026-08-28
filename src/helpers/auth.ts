@@ -96,7 +96,7 @@ function loadUsers(): StoredUser[] {
   const file = usersPath();
   if (!existsSync(file)) return [];
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
     if (
       typeof parsed !== "object" ||
       parsed === null ||

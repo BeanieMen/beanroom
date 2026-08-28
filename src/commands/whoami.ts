@@ -4,13 +4,18 @@ import type { UserSession } from "../types/session.js";
 
 export async function whoamiCommand(session: UserSession, _args: string[]): Promise<void> {
   await Promise.resolve();
-  const info = `User: ${session.user.name} | colorLevel: ${String(session.colorLevel)} | joined: ${session.joinedAt.toISOString()} | term: ${String(session.term.rows)}x${String(session.term.cols)} | loggedIn: ${String(session.user.loggedIn)}`;
-  reply(session, info);
-  session.renderer.writeLine(
-    session,
-    `Gradient: ${session.usernameGradient[0]} to ${session.usernameGradient[1]}`,
-    { gradient: session.usernameGradient },
-  );
+  session.renderer.writePartsLine(session, [
+    { text: "User: " },
+    { text: `${session.user.name}`, style: { gradient: session.usernameGradient } },
+  ]);
+  session.renderer.writeLine(session, `Joined: ${session.joinedAt.toLocaleDateString()}`);
+  session.renderer.writePartsLine(session, [
+    { text: "Username color: Style " },
+    { text: "Gradient ", style: { gradient: session.usernameGradient } },
+    { text: `${session.usernameGradient[0]} `, style: { color: session.usernameGradient[0] } },
+    { text: "to ", style: { color: "\x1b[97m" } },
+    { text: session.usernameGradient[1], style: { color: session.usernameGradient[1] } },
+  ]);
   session.renderer.renderPrompt(session);
 }
 

@@ -30,24 +30,30 @@ export function createSshServer(
   activeLogger: Logger = logger,
 ): Server {
   return new Server({ hostKeys }, (client: Connection, info: ClientInfo) => {
-    activeLogger.info(`Client connected: ${info.ip}`);
+    activeLogger.info(`[server] Client connected: ${info.ip}`);
     let machineName = "Guest";
 
     client.on("authentication", (context: AuthContext) => {
       if (context.method !== "publickey") {
+        activeLogger.debug(`[server] auth reject (method=${context.method})`);
         context.reject(["publickey"]);
         return;
       }
       try {
         const publicKey = context as AuthContext & { username: string; key: { data: Buffer } };
         machineName = getCombinedUsername(publicKey.username, publicKey.key.data);
+        activeLogger.info(
+          `[server] auth accept user=${publicKey.username} -> machine=${machineName}`,
+        );
         context.accept();
       } catch {
+        activeLogger.warn(`[server] auth error for username=${context.username}`);
         context.reject(["publickey"]);
       }
     });
 
     client.on("ready", () => {
+      activeLogger.debug(`[server] client ready (machine=${machineName})`);
       client.on("session", (accept) => {
         const sshSession = accept() as Session;
         let terminal = "";
@@ -59,12 +65,14 @@ export function createSshServer(
           terminal = (info as PseudoTtyInfo & { term?: string }).term ?? "";
           rows = Math.max(2, info.rows || rows);
           cols = Math.max(1, info.cols || cols);
+          activeLogger.debug(`[server] pty term="${terminal}" ${cols}x${rows}`);
           acceptPty();
         });
 
         sshSession.on("window-change", (acceptChange, _reject, info: WindowChangeInfo) => {
           rows = Math.max(2, info.rows || rows);
           cols = Math.max(1, info.cols || cols);
+          activeLogger.debug(`[server] window-change ${cols}x${rows}`);
           if (userSession !== undefined) userSession.renderer.resize(userSession, rows, cols);
           acceptChange();
         });
@@ -72,6 +80,14 @@ export function createSshServer(
         sshSession.on("shell", (acceptShell) => {
           const shell = acceptShell() as ServerChannel;
           const renderer = new TerminalRenderer();
+          activeLogger.debug(`[server] shell requested for machine=${machineName}`);
+          const channel = chatRoom.getChannel("general");
+          if (!channel) {
+            logger.warn("Default channel 'general' not found.");
+            shell.write("Error: Default channel 'general' not found. Closing connection.\n");
+            shell.end();
+            return;
+          }
           const session: UserSession = {
             id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
             client,
@@ -83,20 +99,30 @@ export function createSshServer(
             term: { rows, cols },
             inputBuffer: "",
             renderer,
+            chatRoom,
+            currentChannel: channel,
           };
-          userSession = session;
           renderer.open(session);
-          chatRoom.join(session);
+          channel.join(session);
+          activeLogger.info(`[server] session=${session.id} joined channel="general"`);
+
+          userSession = session;
 
           const input = new InputHandler(session, (message) => {
-            if (message.startsWith("/")) void handleCommand(session, message);
-            else chatRoom.post(session.id, message);
+            if (message.startsWith("/")) {
+              activeLogger.debug(`[server] session=${session.id} command: ${message}`);
+              void handleCommand(session, message);
+            } else {
+              activeLogger.debug(`[server] session=${session.id} message: ${message}`);
+              channel.post(session.id, message);
+            }
           });
           shell.on("data", (data: Buffer) => {
             input.handle(data);
           });
           shell.on("close", () => {
-            chatRoom.leave(session.id);
+            activeLogger.info(`[server] session=${session.id} shell closed`);
+            channel.leave(session.id);
             renderer.close(shell);
           });
         });

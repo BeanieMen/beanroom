@@ -53,7 +53,7 @@ function clean(value: string, limit: number): string {
 
 function parseEntry(line: string): ChatLogEntry[] {
   try {
-    const entry = JSON.parse(line) as unknown;
+    const entry = JSON.parse(line);
     if (
       typeof entry === "object" &&
       entry !== null &&

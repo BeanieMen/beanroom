@@ -126,7 +126,7 @@ export class TerminalRenderer {
     this.renderPrompt(session);
   }
 
-  private withMessageCursor(session: UserSession, writeMessage: () => void): void {
+  withMessageCursor(session: UserSession, writeMessage: () => void): void {
     const messageRow = this.messageBottom(session);
     this.write(session.shell, "\x1b[s");
     this.setScrollRegion(session);
@@ -140,7 +140,7 @@ export class TerminalRenderer {
     this.write(session.shell, `\x1b[1;${String(bottom)}r`);
   }
 
-  private writePartsLine(session: UserSession, parts: { text: string; style?: TextStyle }[]): void {
+  writePartsLine(session: UserSession, parts: { text: string; style?: TextStyle }[]): void {
     this.withMessageCursor(session, () => {
       for (const part of parts) this.writePart(session, part.text, part.style);
       this.write(session.shell, "\r\n");
@@ -180,7 +180,7 @@ export class TerminalRenderer {
     return this.hasComposer(session) ? session.term.rows - 3 : Math.max(1, session.term.rows - 1);
   }
 
-  private writeStyled(session: UserSession, text: string, style: TextStyle): void {
+  writeStyled(session: UserSession, text: string, style: TextStyle): void {
     this.writePart(session, text, style);
   }
 

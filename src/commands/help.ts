@@ -11,6 +11,8 @@ export default async function command(session: UserSession, _args: string[]): Pr
     "  /register <username> <password> - create an account",
     "  /login <username> <password>    - log in",
     "  /logout                         - log out",
+    "  /join <channel>                 - join or create a channel",
+    "  /channels                       - list channels",
     "  /whoami                         - show session info",
     "  /clear                          - clear the screen",
     "  /help                           - show this help",
