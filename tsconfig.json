@@ -19,9 +19,6 @@
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
 
-    // Explicitly include Bun + Node types so VS Code always finds them
-    "types": ["bun-types", "node"],
-
     // Best practices
     "strict": true,
     "skipLibCheck": true,
@@ -29,9 +26,11 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
 
-    // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    // Hardened flags (T1.1)
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "exactOptionalPropertyTypes": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "forceConsistentCasingInFileNames": true
   }
 }

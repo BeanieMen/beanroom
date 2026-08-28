@@ -1,0 +1,14 @@
+node_modules
+dist
+out
+coverage
+ssh_host_*
+*.log
+chatlog.txt
+chatlog.json
+users.txt
+data
+.opencode
+.cache
+*.tsbuildinfo
+bun.lock

@@ -1,38 +1,36 @@
-import type { ChatRoom, UserSession } from "../chatroom";
-import { RichWriteLine } from "../helper";
-import { readFileSync, writeFileSync } from "fs";
+import { AuthService } from "../helpers/auth.js";
 
-export default function command(session: UserSession, args: string[]): void {
-  if (args.length != 2) {
-    RichWriteLine(session.shell, "Usage: /login <username> <password>", {
-      colorLevel: session.colorLevel,
-    });
+import { reply } from "./output.js";
+
+import type { UserSession } from "../types/session.js";
+
+const authService = new AuthService();
+
+export default async function command(session: UserSession, args: string[]): Promise<void> {
+  const sanitizedArgs = args.map((a) => a.trim()).slice(0, 3);
+
+  if (sanitizedArgs.length !== 2) {
+    reply(session, "Usage: /login <username> <password>");
     return;
   }
-  const [username, password] = args;
-  const passwords = readFileSync("users.txt", "utf-8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line)) as {
-    username: string;
-    password: string;
-  }[];
-  const userExists = passwords.some((user) => {
-    return user.username === username && user.password === password;
-  });
 
-  if (!userExists) {
-    RichWriteLine(
-      session.shell,
-      `User ${username} not found or incorrect password.`,
-      {
-        colorLevel: session.colorLevel,
-      },
-    );
+  const username = sanitizedArgs[0] ?? "";
+  const password = sanitizedArgs[1] ?? "";
+
+  if (username.length === 0 || password.length === 0) {
+    reply(session, "Usage: /login <username> <password>");
     return;
   }
-  RichWriteLine(session.shell, `User ${username} logged in successfully!`, {
-    colorLevel: session.colorLevel,
-  });
-  session.user.login(username!);
+
+  try {
+    const result = await authService.login(username, password);
+    if (result.username === undefined) {
+      reply(session, result.message);
+      return;
+    }
+    session.user.login(result.username);
+    reply(session, result.message);
+  } catch {
+    reply(session, "Invalid credentials.");
+  }
 }

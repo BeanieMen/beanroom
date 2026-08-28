@@ -1,22 +1,31 @@
-import type { ChatRoom, UserSession } from "../chatroom";
-import { RichWriteLine } from "../helper";
-import { writeFileSync } from "fs";
+import { AuthService } from "../helpers/auth.js";
 
-export default function command(
-  session: UserSession,
-  args: string[],
-): void {
-  if (args.length < 2) {
-    RichWriteLine(session.shell, "Usage: /register <username> <password>", {
-      colorLevel: session.colorLevel,
-    });
+import { reply } from "./output.js";
+
+import type { UserSession } from "../types/session.js";
+
+const authService = new AuthService();
+
+export default async function command(session: UserSession, args: string[]): Promise<void> {
+  const sanitizedArgs = args.map((a) => a.trim()).slice(0, 3);
+
+  if (sanitizedArgs.length < 2) {
+    reply(session, "Usage: /register <username> <password>");
     return;
   }
-  const [username, password] = args;
-  writeFileSync("users.txt", JSON.stringify({ username, password }) + "\n", {
-    flag: "a",
-  });
-    RichWriteLine(session.shell, `User ${username} registered successfully! Type /login ${username} ${password} to log in.`, {
-      colorLevel: session.colorLevel,
-    });
+
+  const username = sanitizedArgs[0] ?? "";
+  const password = sanitizedArgs[1] ?? "";
+
+  if (username.length === 0 || password.length === 0) {
+    reply(session, "Usage: /register <username> <password>");
+    return;
+  }
+
+  try {
+    const result = await authService.register(username, password);
+    reply(session, result);
+  } catch {
+    reply(session, "Registration failed. Please try again.");
+  }
 }
