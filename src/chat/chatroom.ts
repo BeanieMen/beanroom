@@ -78,6 +78,21 @@ export class ChatRoom {
     });
   }
 
+  /** Send a popup modal to a specific user session or broadcast to all active sessions in the chatroom */
+  broadcastPopup(popup: import("../types/session.js").PopupModal, targetSessionId?: string): void {
+    const targetChannels = [...this.channels.values()];
+    const sessionsSeen = new Set<string>();
+    for (const channel of targetChannels) {
+      for (const session of channel.all()) {
+        if (sessionsSeen.has(session.id)) continue;
+        sessionsSeen.add(session.id);
+        if (targetSessionId === undefined || session.id === targetSessionId) {
+          session.renderer.showPopup(session, popup);
+        }
+      }
+    }
+  }
+
   /** Flush pending history writes for every channel. Used on shutdown. */
   async flushAll(): Promise<void> {
     await Promise.all([...this.channels.values()].map((channel) => channel.flush()));

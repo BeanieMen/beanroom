@@ -1,5 +1,6 @@
 import { logger } from "../helpers/logger.js";
 
+import announce from "./announce.js";
 import channels from "./channels.js";
 import color from "./color.js";
 import help from "./help.js";
@@ -16,6 +17,7 @@ import type { UserSession } from "../types/session.js";
 export type CommandHandler = (session: UserSession, args: string[]) => void | Promise<void>;
 
 export const commands: Record<string, CommandHandler> = {
+  announce,
   channels,
   clear: clearCommand,
   help,

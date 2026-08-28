@@ -4,7 +4,7 @@ import { UI_THEMES, type UiThemeName } from "./config.js";
 import { logger } from "./logger.js";
 
 import type { ColorSupportLevel } from "../types/chat.js";
-import type { UserSession } from "../types/session.js";
+import type { PopupModal, UserSession } from "../types/session.js";
 import type { ServerChannel } from "ssh2";
 
 const ESC = "\x1b";
@@ -121,18 +121,39 @@ export class TerminalRenderer {
     return session.chatRoom.listChannelDetails()[selected]?.name;
   }
 
+  showPopup(session: UserSession, popup: PopupModal): void {
+    session.activePopup = popup;
+    this.redraw(session);
+  }
+
+  closePopup(session: UserSession): void {
+    if (session.activePopup === null) return;
+    const popup = session.activePopup;
+    session.activePopup = null;
+    if (popup.onClose) {
+      try {
+        popup.onClose();
+      } catch (err) {
+        logger.warn(`Popup onClose callback error: ${String(err)}`);
+      }
+    }
+    this.redraw(session);
+  }
+
   writeLine(session: UserSession, text: string, style: TextStyle = {}): void {
     if (session.channelList !== null) return;
     if (this.hasFramedLayout(session)) {
       this.withMessageCursor(session, () => {
         this.writeFramedParts(session, [{ text, style }]);
       });
+      if (session.activePopup !== null) this.renderPopup(session);
       return;
     }
     this.withMessageCursor(session, () => {
       this.writeStyled(session, text, style);
       this.write(session.shell, "\r\n");
     });
+    if (session.activePopup !== null) this.renderPopup(session);
   }
 
   writeUserMessage(
@@ -158,16 +179,19 @@ export class TerminalRenderer {
     }
     if (this.hasFramedLayout(session)) {
       this.renderComposer(session);
+      if (session.activePopup !== null) this.renderPopup(session);
       return;
     }
     if (this.hasComposer(session)) {
       this.renderComposer(session);
+      if (session.activePopup !== null) this.renderPopup(session);
       return;
     }
     const row = Math.max(1, session.term.rows);
     this.write(session.shell, `\x1b[${String(row)};1H\r\x1b[K`);
     this.writePart(session, `${session.user.name} > `, { gradient: session.usernameGradient });
     this.writePart(session, session.inputBuffer, { color: this.theme(session).foreground });
+    if (session.activePopup !== null) this.renderPopup(session);
   }
 
   maxInputLength(session: UserSession): number {
@@ -196,6 +220,9 @@ export class TerminalRenderer {
     if (this.hasFramedLayout(session)) this.drawFrame(session);
     this.setScrollRegion(session);
     this.renderPrompt(session);
+    if (session.activePopup !== null) {
+      this.renderPopup(session);
+    }
   }
 
   refreshFrameHeader(session: UserSession): void {
@@ -405,6 +432,100 @@ export class TerminalRenderer {
     );
   }
 
+  private renderPopup(session: UserSession): void {
+    const popup = session.activePopup;
+    if (popup === null) return;
+
+    const { cols, rows } = session.term;
+    const theme = this.theme(session);
+
+    // Calculate dimensions
+    const maxWidth = Math.max(30, cols - 6);
+    const boxWidth = Math.min(68, maxWidth);
+    
+    // Wrap popup body lines to fit inside box
+    const innerWidth = boxWidth - 4; // 2 padding/border each side
+    const wrappedLines: { text: string; indent?: boolean }[] = [];
+    for (const rawLine of popup.lines) {
+      if (rawLine === "") {
+        wrappedLines.push({ text: "" });
+        continue;
+      }
+      const words = rawLine.split(" ");
+      let currentLine = "";
+      for (const word of words) {
+        if (currentLine === "") {
+          if (visibleWidth(word) > innerWidth) {
+            wrappedLines.push({ text: truncate(word, innerWidth) });
+          } else {
+            currentLine = word;
+          }
+        } else if (visibleWidth(currentLine) + 1 + visibleWidth(word) <= innerWidth) {
+          currentLine += " " + word;
+        } else {
+          wrappedLines.push({ text: currentLine });
+          currentLine = word;
+        }
+      }
+      if (currentLine !== "") {
+        wrappedLines.push({ text: currentLine });
+      }
+    }
+
+    const headerHeight = (popup.author || popup.timeAgo) ? 2 : 1;
+    const footerHeight = popup.controlsHint ? 2 : 1;
+    const contentHeight = wrappedLines.length;
+    const boxHeight = headerHeight + contentHeight + footerHeight + 1; // +1 top border
+
+    const startRow = Math.max(2, Math.floor((rows - boxHeight) / 2));
+    const startCol = Math.max(1, Math.floor((cols - boxWidth) / 2));
+
+    // Top border with title
+    const titleStr = popup.title;
+    const topText = topBorder(boxWidth, ` ${titleStr} `);
+    this.writeAt(session, startRow, startCol, topText, { color: theme.border });
+
+    let currentOffset = 1;
+
+    // Optional author line
+    if (popup.author || popup.timeAgo) {
+      const authorPart = popup.author ? `@${popup.author}` : "";
+      const timePart = popup.timeAgo ? ` ${popup.timeAgo}` : "";
+      const metaText = `${authorPart}${timePart}`;
+      const headerLine = boxBorder(boxWidth, metaText);
+      this.writeAt(session, startRow + currentOffset, startCol, headerLine, { color: theme.highlight });
+      currentOffset += 1;
+    }
+
+    // Body lines
+    for (const item of wrappedLines) {
+      const lineStr = item.text;
+      const isBullet = lineStr.trim().startsWith("•") || lineStr.trim().startsWith("-");
+      const isCommand = lineStr.trim().startsWith("/");
+      const color = isBullet || isCommand ? theme.warm : theme.foreground;
+      
+      const formatted = boxBorder(boxWidth, lineStr);
+      this.writeAt(session, startRow + currentOffset, startCol, formatted, { color });
+      currentOffset += 1;
+    }
+
+    // Controls hint
+    if (popup.controlsHint) {
+      const hintLine = ruleBorder(boxWidth, ` ${popup.controlsHint} `);
+      this.writeAt(session, startRow + currentOffset, startCol, hintLine, { color: theme.muted });
+      currentOffset += 1;
+    }
+
+    // Bottom border
+    const bottomLine = `╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`;
+    this.writeAt(session, startRow + currentOffset, startCol, bottomLine, { color: theme.border });
+  }
+
+  private writeAt(session: UserSession, row: number, col: number, text: string, style: TextStyle): void {
+    this.write(session.shell, `\x1b[${String(row)};${String(col)}H`);
+    this.writePart(session, text, style);
+  }
+
   private writeFramedParts(
     session: UserSession,
     parts: { text: string; style?: TextStyle }[],
@@ -550,7 +671,9 @@ export class InputHandler {
     this.escapeTimer = setTimeout(() => {
       this.escapeTimer = null;
       if (this.escapeSequence === "\x1b") {
-        if (this.session.channelList !== null) {
+        if (this.session.activePopup !== null) {
+          this.session.renderer.closePopup(this.session);
+        } else if (this.session.channelList !== null) {
           this.session.renderer.closeChannelList(this.session);
         }
       }
@@ -567,6 +690,25 @@ export class InputHandler {
 
   private handleCharacter(character: string): void {
     if (this.consumeEscapeSequence(character)) return;
+
+    if (this.session.activePopup !== null) {
+      if (
+        character === "\r" ||
+        character === "\n" ||
+        character === "q" ||
+        character === "Q" ||
+        character === "\x1b" ||
+        character === " "
+      ) {
+        this.session.renderer.closePopup(this.session);
+        return;
+      }
+      if (character === "\x03") {
+        this.session.renderer.closePopup(this.session);
+        return;
+      }
+      return;
+    }
 
     if (this.session.channelList !== null) {
       if (character === "k" || character === "K") {

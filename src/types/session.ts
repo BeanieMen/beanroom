@@ -5,6 +5,15 @@ import type { ChatRoom } from "../chat/chatroom.js";
 import type { UiThemeName } from "../helpers/config.js";
 import type { TerminalRenderer } from "../helpers/terminal.js";
 import type { Connection, ServerChannel } from "ssh2";
+export interface PopupModal {
+  title: string;
+  author?: string;
+  timeAgo?: string;
+  lines: string[];
+  controlsHint?: string;
+  onClose?: () => void;
+}
+
 export interface UserSession {
   id: string;
   client: Connection;
@@ -17,6 +26,7 @@ export interface UserSession {
   term: { rows: number; cols: number };
   inputBuffer: string;
   channelList: { selected: number } | null;
+  activePopup: PopupModal | null;
   renderer: TerminalRenderer;
   chatRoom: ChatRoom;
   currentChannel: ChatRoomChannel | null;

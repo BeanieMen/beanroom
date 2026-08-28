@@ -101,6 +101,7 @@ export function createSshServer(
             term: { rows, cols },
             inputBuffer: "",
             channelList: null,
+            activePopup: null,
             renderer,
             chatRoom,
             currentChannel: channel,
@@ -108,6 +109,25 @@ export function createSshServer(
           renderer.open(session);
           channel.join(session);
           activeLogger.info(`[server] session=${session.id} joined channel="general"`);
+
+          renderer.showPopup(session, {
+            title: "#info",
+            author: "BeanieMan",
+            timeAgo: "you just came here brah....",
+            lines: [
+              "HEY!!~, You there. Yes you i am talking to you be nice. thats the first rule and just be a good human being",
+              "",
+              "this is an le anon chatroom or wtv you can do anything. this is being actively developed on. down below is just some useful stuff you should know",
+              "",
+              "list help about /list",
+              "/login",
+              "/register",
+              "and other stuff",
+              "",
+              "if you want your stuff to be saved and not have the weird guest:machine@pvkey, do /register it takes like 2 mins",
+            ],
+            controlsHint: "Enter continue  Esc/q close",
+          });
 
           userSession = session;
 
