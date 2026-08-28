@@ -493,7 +493,7 @@ export class TerminalRenderer {
       const timePart = popup.timeAgo ? ` ${popup.timeAgo}` : "";
       const metaText = `${authorPart}${timePart}`;
       const headerLine = boxBorder(boxWidth, metaText);
-      this.writeAt(session, startRow + currentOffset, startCol, headerLine, { color: theme.highlight });
+      this.writeAt(session, startRow + currentOffset, startCol, headerLine, { color: theme.highlight, fillBg: true });
       currentOffset += 1;
     }
 
@@ -505,14 +505,14 @@ export class TerminalRenderer {
       const color = isBullet || isCommand ? theme.warm : theme.foreground;
       
       const formatted = boxBorder(boxWidth, lineStr);
-      this.writeAt(session, startRow + currentOffset, startCol, formatted, { color });
+      this.writeAt(session, startRow + currentOffset, startCol, formatted, { color, fillBg: true });
       currentOffset += 1;
     }
 
     // Controls hint
     if (popup.controlsHint) {
       const hintLine = ruleBorder(boxWidth, ` ${popup.controlsHint} `);
-      this.writeAt(session, startRow + currentOffset, startCol, hintLine, { color: theme.muted });
+      this.writeAt(session, startRow + currentOffset, startCol, hintLine, { color: theme.muted, fillBg: true });
       currentOffset += 1;
     }
 
@@ -521,8 +521,24 @@ export class TerminalRenderer {
     this.writeAt(session, startRow + currentOffset, startCol, bottomLine, { color: theme.border });
   }
 
-  private writeAt(session: UserSession, row: number, col: number, text: string, style: TextStyle): void {
+  private writeAt(
+    session: UserSession,
+    row: number,
+    col: number,
+    text: string,
+    style: TextStyle & { fillBg?: boolean },
+  ): void {
     this.write(session.shell, `\x1b[${String(row)};${String(col)}H`);
+    if (style.fillBg) {
+      const [r, g, b] = hexToRgb(this.theme(session).background);
+      const bgCode =
+        session.colorLevel === 3
+          ? `\x1b[48;2;${String(r)};${String(g)};${String(b)}m`
+          : session.colorLevel === 2
+            ? `\x1b[48;5;${String(rgbTo256(r, g, b))}m`
+            : "";
+      this.write(session.shell, bgCode);
+    }
     this.writePart(session, text, style);
   }
 
