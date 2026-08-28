@@ -1,21 +1,24 @@
-import { APP_CONFIG, THEME } from "../helpers/config";
-import { logger } from "../helpers/logger";
-import { formatTimestamp, getUsernameColor } from "../helpers/terminal";
+import { APP_CONFIG, UI_THEMES } from "../helpers/config.js";
+import { logger } from "../helpers/logger.js";
+import { formatTimestamp, getUsernameColor } from "../helpers/terminal.js";
 
-import type { HistoryService } from "./history";
-import type { UserSession } from "../types/session";
+import type { HistoryService } from "./history.js";
+import type { UserSession } from "../types/session.js";
 
 export class ChatRoomChannel {
   private readonly sesssions = new Map<string, UserSession>();
+  private readonly typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     public readonly name: string,
+    public readonly description: string,
     private readonly history: HistoryService,
   ) {}
 
   join(user: UserSession): void {
     this.sesssions.set(user.id, user);
     user.currentChannel = this;
+    this.refreshFrames();
     this.announce(`${user.user.name} has joined ${this.name}.`, user.id);
     logger.info(
       `[channel:${this.name}] join session=${user.id} user=${user.user.name} (members=${this.sesssions.size})`,
@@ -33,8 +36,10 @@ export class ChatRoomChannel {
       return;
     }
 
+    this.setTyping(sessionId, false);
     this.sesssions.delete(sessionId);
     user.currentChannel = null;
+    this.refreshFrames();
     logger.info(
       `[channel:${this.name}] leave session=${sessionId} user=${user.user.name} (members=${this.sesssions.size})`,
     );
@@ -49,6 +54,7 @@ export class ChatRoomChannel {
       return;
     }
 
+    this.setTyping(sessionId, false);
     const timestamp = new Date();
 
     logger.info(
@@ -80,6 +86,44 @@ export class ChatRoomChannel {
     return this.sesssions.has(sessionId);
   }
 
+  setTyping(sessionId: string, isTyping: boolean): void {
+    if (!this.sesssions.has(sessionId)) return;
+    const existing = this.typingTimers.get(sessionId);
+    if (existing !== undefined) clearTimeout(existing);
+
+    if (!isTyping) {
+      if (existing !== undefined) {
+        this.typingTimers.delete(sessionId);
+        this.refreshTypingIndicators();
+      }
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.typingTimers.delete(sessionId);
+      this.refreshTypingIndicators();
+    }, 3_000);
+    this.typingTimers.set(sessionId, timer);
+    this.refreshTypingIndicators();
+  }
+
+  typingIndicatorFor(sessionId: string): string | undefined {
+    const names = [...this.typingTimers.keys()]
+      .filter((id) => id !== sessionId)
+      .map((id) => this.sesssions.get(id)?.user.name)
+      .filter((name): name is string => name !== undefined);
+
+    if (names.length === 0) return undefined;
+    if (names.length === 1) return `${names[0]} is typing…`;
+    if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+    return `${names.slice(0, 2).join(", ")}, and others are typing…`;
+  }
+
+  /** Flush any pending history writes for this channel to disk. */
+  async flush(): Promise<void> {
+    await this.history.flush();
+  }
+
   private announce(message: string, excludedSessionId?: string): void {
     const timestamp = new Date();
 
@@ -90,7 +134,7 @@ export class ChatRoomChannel {
     for (const recipient of this.sesssions.values()) {
       if (recipient.id === excludedSessionId) continue;
       recipient.renderer.writeLine(recipient, `${formatTimestamp(timestamp)} ${message}`, {
-        color: THEME.systemColor,
+        color: UI_THEMES[recipient.theme].muted,
       });
       recipient.renderer.renderPrompt(recipient);
     }
@@ -106,7 +150,7 @@ export class ChatRoomChannel {
 
       if (entry.sender === "system") {
         user.renderer.writeLine(user, `${timestamp} ${entry.message}`, {
-          color: THEME.systemColor,
+          color: UI_THEMES[user.theme].muted,
         });
         continue;
       }
@@ -119,5 +163,13 @@ export class ChatRoomChannel {
         timestamp,
       );
     }
+  }
+
+  private refreshFrames(): void {
+    for (const session of this.sesssions.values()) session.renderer.refreshFrameHeader(session);
+  }
+
+  private refreshTypingIndicators(): void {
+    for (const session of this.sesssions.values()) session.renderer.renderPrompt(session);
   }
 }

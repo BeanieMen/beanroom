@@ -35,3 +35,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 ssh_host_ed25519_key
 ssh_host_ed25519_key.pub
 .opencode
+*.txt

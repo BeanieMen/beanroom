@@ -12,6 +12,7 @@ import {
 import { handleCommand } from "../commands/handler.js";
 import { User } from "../types/user.js";
 
+import { DEFAULT_THEME } from "./config.js";
 import { logger, type Logger } from "./logger.js";
 import { getCombinedUsername } from "./name.js";
 import {
@@ -95,9 +96,11 @@ export function createSshServer(
             user: new User(machineName),
             colorLevel: getTerminalColorSupport(terminal),
             usernameGradient: getUsernameColor(machineName),
+            theme: DEFAULT_THEME,
             joinedAt: new Date(),
             term: { rows, cols },
             inputBuffer: "",
+            channelList: null,
             renderer,
             chatRoom,
             currentChannel: channel,
@@ -108,15 +111,22 @@ export function createSshServer(
 
           userSession = session;
 
-          const input = new InputHandler(session, (message) => {
-            if (message.startsWith("/")) {
-              activeLogger.debug(`[server] session=${session.id} command: ${message}`);
-              void handleCommand(session, message);
-            } else {
-              activeLogger.debug(`[server] session=${session.id} message: ${message}`);
-              channel.post(session.id, message);
-            }
-          });
+          const input = new InputHandler(
+            session,
+            (message) => {
+              if (message.startsWith("/")) {
+                activeLogger.debug(`[server] session=${session.id} command: ${message}`);
+                void handleCommand(session, message);
+              } else {
+                activeLogger.debug(`[server] session=${session.id} message: ${message}`);
+                channel.post(session.id, message);
+              }
+            },
+            (channelName: string) => {
+              session.renderer.closeChannelList(session);
+              void handleCommand(session, `/join ${channelName}`);
+            },
+          );
           shell.on("data", (data: Buffer) => {
             input.handle(data);
           });

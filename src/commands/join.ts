@@ -8,7 +8,11 @@ export default async function command(session: UserSession, args: string[]): Pro
   await Promise.resolve();
   const target = (args[0] ?? "").trim();
   if (target.length === 0) {
-    reply(session, "Usage: /join <channel>");
+    reply(session, "Usage: /join <channel> [description]");
+    return;
+  }
+  if (!/^[a-z0-9][a-z0-9_-]{0,23}$/i.test(target)) {
+    reply(session, "Channel names use letters, numbers, underscores, and hyphens (max 24). ");
     return;
   }
 
@@ -18,11 +22,10 @@ export default async function command(session: UserSession, args: string[]): Pro
     return;
   }
 
-  const channel = session.chatRoom.getChannel(target);
-  if (channel === undefined) {
-     reply(session, `Channel "${target}" does not exist.`);
-      return;
-  }
+  let channel = session.chatRoom.getChannel(target);
+  const description = args.slice(1).join(" ");
+  const created = channel === undefined;
+  channel ??= session.chatRoom.createChannel(target, description);
 
   if (current !== null) {
     current.leave(session.id);
@@ -32,5 +35,5 @@ export default async function command(session: UserSession, args: string[]): Pro
   logger.info(
     `[join] session=${session.id} moved ${session.user.name} ${current?.name ?? "(none)"} -> ${target}`,
   );
-  reply(session, `Joined channel "${target}".`);
+  reply(session, created ? `Created and joined #${target}.` : `Joined channel "${target}".`);
 }

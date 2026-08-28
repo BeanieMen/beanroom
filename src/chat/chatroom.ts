@@ -10,7 +10,11 @@ export class ChatRoom {
   private readonly channels = new Map<string, ChatRoomChannel>();
 
   constructor() {
-    const defaultChannel = new ChatRoomChannel("general", new HistoryService("general.txt"));
+    const defaultChannel = new ChatRoomChannel(
+      "general",
+      "The main Beanroom chat. Pull up a chair.",
+      new HistoryService("general.txt"),
+    );
     this.channels.set("general", defaultChannel);
     logger.info(`[chatroom] initialized; default channel "general" created`);
   }
@@ -22,14 +26,21 @@ export class ChatRoom {
   all(): UserSession[] {
     return [...this.sessions.values()];
   }
-  createChannel(name: string): ChatRoomChannel {
+  createChannel(name: string, description?: string): ChatRoomChannel {
     if (this.channels.has(name)) {
       logger.warn(`[chatroom] createChannel failed: "${name}" already exists`);
       throw new Error(`Channel "${name}" already exists.`);
     }
     const history = new HistoryService(`${name}.txt`);
 
-    const channel = new ChatRoomChannel(name, history);
+    const trimmedDescription = description?.trim();
+    const channel = new ChatRoomChannel(
+      name,
+      trimmedDescription && trimmedDescription.length > 0
+        ? trimmedDescription
+        : `A room for #${name}.`,
+      history,
+    );
 
     this.channels.set(name, channel);
     logger.info(`[chatroom] created channel "${name}" (total=${this.channels.size})`);
@@ -57,5 +68,18 @@ export class ChatRoom {
     const names = [...this.channels.keys()];
     logger.debug(`[chatroom] listChannels -> ${names.join(", ") || "(none)"}`);
     return names;
+  }
+
+  listChannelDetails(): ChatRoomChannel[] {
+    return [...this.channels.values()].sort((left, right) => {
+      if (left.name === "general") return -1;
+      if (right.name === "general") return 1;
+      return left.name.localeCompare(right.name);
+    });
+  }
+
+  /** Flush pending history writes for every channel. Used on shutdown. */
+  async flushAll(): Promise<void> {
+    await Promise.all([...this.channels.values()].map((channel) => channel.flush()));
   }
 }

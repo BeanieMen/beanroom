@@ -4,9 +4,11 @@ import channels from "./channels.js";
 import color from "./color.js";
 import help from "./help.js";
 import join from "./join.js";
+import list from "./list.js";
 import login from "./login.js";
 import { reply } from "./output.js";
 import register from "./register.js";
+import theme from "./theme.js";
 import { clearCommand, logoutCommand, whoamiCommand } from "./whoami.js";
 
 import type { UserSession } from "../types/session.js";
@@ -19,8 +21,10 @@ export const commands: Record<string, CommandHandler> = {
   help,
   join,
   login,
+  list,
   logout: logoutCommand,
   register,
+  theme,
   whoami: whoamiCommand,
   color,
 };

@@ -1,6 +1,6 @@
 import gradient from "gradient-string";
 
-import { THEME } from "./config.js";
+import { UI_THEMES, type UiThemeName } from "./config.js";
 import { logger } from "./logger.js";
 
 import type { ColorSupportLevel } from "../types/chat.js";
@@ -11,6 +11,7 @@ const ESC = "\x1b";
 const ALT_BUFFER_ENTER = "\x1b[?1049h";
 const ALT_BUFFER_LEAVE = "\x1b[?1049l";
 const RESET = "\x1b[0m";
+const OSC_TERMINATOR = "\x1b\\";
 
 export interface TextStyle {
   color?: string;
@@ -47,33 +48,87 @@ export function formatTimestamp(date = new Date()): string {
 }
 
 export class TerminalRenderer {
+  private readonly beanAnimations = new Map<
+    ServerChannel,
+    { atTop: boolean; timer: ReturnType<typeof setInterval> }
+  >();
+
   open(session: UserSession): void {
-    this.write(session.shell, `${ALT_BUFFER_ENTER}\x1b[2J\x1b[H`);
-    this.setScrollRegion(session);
-    this.write(session.shell, "\x1b[1;1H");
+    this.write(session.shell, ALT_BUFFER_ENTER);
+    this.startBeanAnimation(session);
+    this.redraw(session);
   }
 
   close(shell: ServerChannel): void {
-    this.write(shell, `\x1b[r${ALT_BUFFER_LEAVE}`);
+    const animation = this.beanAnimations.get(shell);
+    if (animation !== undefined) {
+      clearInterval(animation.timer);
+      this.beanAnimations.delete(shell);
+    }
+    // Restore the user's terminal colours after leaving the alternate buffer.
+    this.write(
+      shell,
+      `\x1b[r\x1b]110${OSC_TERMINATOR}\x1b]111${OSC_TERMINATOR}\x1b]112${OSC_TERMINATOR}${ALT_BUFFER_LEAVE}`,
+    );
   }
 
   showWelcome(session: UserSession): void {
-    this.writeLine(session, "╔══════════════════╗", { gradient: THEME.bannerGradient });
+    const theme = this.theme(session);
+    this.writeLine(session, "╔══════════════════╗", { gradient: theme.bannerGradient });
     this.writePartsLine(session, [
-      { text: "║", style: { gradient: THEME.bannerGradient } },
+      { text: "║", style: { gradient: theme.bannerGradient } },
       { text: "     BEANROOM     " },
-      { text: "║", style: { gradient: THEME.bannerGradientReverse } },
+      { text: "║", style: { gradient: theme.bannerGradientReverse } },
     ]);
-    this.writeLine(session, "╚══════════════════╝", { gradient: THEME.bannerGradient });
+    this.writeLine(session, "╚══════════════════╝", { gradient: theme.bannerGradient });
     this.writeLine(
       session,
       "Welcome to Beanroom. Be kind, and use /register <username> <password> to save your preferences.",
-      { color: THEME.welcomeColor },
+      { color: theme.highlight },
     );
     this.writeLine(session, "");
   }
 
+  openChannelList(session: UserSession): void {
+    const channels = session.chatRoom.listChannelDetails();
+    const current = session.currentChannel?.name;
+    const selected = Math.max(
+      0,
+      channels.findIndex((channel) => channel.name === current),
+    );
+    session.inputBuffer = "";
+    session.channelList = { selected };
+    this.renderChannelList(session);
+  }
+
+  closeChannelList(session: UserSession): void {
+    if (session.channelList === null) return;
+    session.channelList = null;
+    this.redraw(session);
+  }
+
+  moveChannelList(session: UserSession, direction: -1 | 1): void {
+    const state = session.channelList;
+    const channels = session.chatRoom.listChannelDetails();
+    if (state === null || channels.length === 0) return;
+    state.selected = (state.selected + direction + channels.length) % channels.length;
+    this.renderChannelList(session);
+  }
+
+  selectedChannelName(session: UserSession): string | undefined {
+    const selected = session.channelList?.selected;
+    if (selected === undefined) return undefined;
+    return session.chatRoom.listChannelDetails()[selected]?.name;
+  }
+
   writeLine(session: UserSession, text: string, style: TextStyle = {}): void {
+    if (session.channelList !== null) return;
+    if (this.hasFramedLayout(session)) {
+      this.withMessageCursor(session, () => {
+        this.writeFramedParts(session, [{ text, style }]);
+      });
+      return;
+    }
     this.withMessageCursor(session, () => {
       this.writeStyled(session, text, style);
       this.write(session.shell, "\r\n");
@@ -87,16 +142,24 @@ export class TerminalRenderer {
     senderGradient: [string, string],
     timestamp: string,
   ): void {
-    this.withMessageCursor(session, () => {
-      this.writePart(session, `${timestamp} `, { color: THEME.systemColor });
-      this.writePart(session, sender, { gradient: senderGradient });
-      this.writePart(session, " > ");
-      this.writePart(session, message, { color: THEME.white });
-      this.write(session.shell, "\r\n");
-    });
+    if (session.channelList !== null) return;
+    this.writePartsLine(session, [
+      { text: `${timestamp} `, style: { color: this.theme(session).muted } },
+      { text: sender, style: { gradient: senderGradient } },
+      { text: " > " },
+      { text: message, style: { color: this.theme(session).foreground } },
+    ]);
   }
 
   renderPrompt(session: UserSession): void {
+    if (session.channelList !== null) {
+      this.renderChannelList(session);
+      return;
+    }
+    if (this.hasFramedLayout(session)) {
+      this.renderComposer(session);
+      return;
+    }
     if (this.hasComposer(session)) {
       this.renderComposer(session);
       return;
@@ -104,43 +167,71 @@ export class TerminalRenderer {
     const row = Math.max(1, session.term.rows);
     this.write(session.shell, `\x1b[${String(row)};1H\r\x1b[K`);
     this.writePart(session, `${session.user.name} > `, { gradient: session.usernameGradient });
-    this.writePart(session, session.inputBuffer, { color: THEME.white });
+    this.writePart(session, session.inputBuffer, { color: this.theme(session).foreground });
   }
 
   maxInputLength(session: UserSession): number {
-    if (!this.hasComposer(session)) return 512;
+    if (!this.hasFramedLayout(session)) return 512;
     const inputWidth = session.term.cols - 4 - visibleWidth(session.user.name) - 3;
     return Math.max(0, Math.min(512, inputWidth));
   }
 
   clear(session: UserSession): void {
-    this.write(session.shell, "\x1b[2J\x1b[H");
-    this.setScrollRegion(session);
-    this.renderPrompt(session);
+    this.redraw(session);
   }
 
   resize(session: UserSession, rows: number, cols: number): void {
     session.term.rows = Math.max(2, rows);
     session.term.cols = Math.max(1, cols);
+    this.redraw(session);
+  }
+
+  redraw(session: UserSession): void {
+    if (session.channelList !== null) {
+      this.renderChannelList(session);
+      return;
+    }
+    this.write(session.shell, "\x1b[r\x1b[2J\x1b[H");
+    this.applyScreenTheme(session);
+    if (this.hasFramedLayout(session)) this.drawFrame(session);
     this.setScrollRegion(session);
     this.renderPrompt(session);
+  }
+
+  refreshFrameHeader(session: UserSession): void {
+    if (session.channelList !== null || !this.hasFramedLayout(session)) return;
+    this.write(session.shell, "\x1b[s");
+    this.drawFrameHeader(session);
+    this.write(session.shell, "\x1b[u");
   }
 
   withMessageCursor(session: UserSession, writeMessage: () => void): void {
     const messageRow = this.messageBottom(session);
     this.write(session.shell, "\x1b[s");
     this.setScrollRegion(session);
-    this.write(session.shell, `\x1b[${String(messageRow)};1H\r\x1b[K`);
+    this.write(
+      session.shell,
+      this.hasFramedLayout(session)
+        ? `\x1b[${String(messageRow)};1H\r`
+        : `\x1b[${String(messageRow)};1H\r\x1b[K`,
+    );
     writeMessage();
     this.write(session.shell, "\x1b[u");
   }
 
   private setScrollRegion(session: UserSession): void {
     const bottom = this.messageBottom(session);
-    this.write(session.shell, `\x1b[1;${String(bottom)}r`);
+    const top = this.hasFramedLayout(session) ? 5 : 1;
+    this.write(session.shell, `\x1b[${String(top)};${String(bottom)}r`);
   }
 
   writePartsLine(session: UserSession, parts: { text: string; style?: TextStyle }[]): void {
+    if (this.hasFramedLayout(session)) {
+      this.withMessageCursor(session, () => {
+        this.writeFramedParts(session, parts);
+      });
+      return;
+    }
     this.withMessageCursor(session, () => {
       for (const part of parts) this.writePart(session, part.text, part.style);
       this.write(session.shell, "\r\n");
@@ -151,22 +242,29 @@ export class TerminalRenderer {
     const topRow = session.term.rows - 2;
     const inputRow = session.term.rows - 1;
     const width = session.term.cols;
+    const theme = this.theme(session);
     const bodyWidth = width - 4;
     const promptWidth = visibleWidth(session.user.name) + 3;
     const input = truncate(session.inputBuffer, Math.max(0, bodyWidth - promptWidth));
     const padding = " ".repeat(Math.max(0, bodyWidth - promptWidth - visibleWidth(input)));
 
     this.write(session.shell, `\x1b[${String(topRow)};1H\r\x1b[K`);
-    this.writePart(session, topBorder(width), { color: THEME.systemColor });
+    const typing = session.currentChannel?.typingIndicatorFor(session.id);
+    const composerLabel = typing
+      ? ` ${typing}  ·  compose  ·  enter sends `
+      : " compose  ·  enter sends  ·  /help for commands ";
+    this.writePart(session, ruleBorder(width, composerLabel), {
+      color: theme.border,
+    });
     this.write(session.shell, `\x1b[${String(inputRow)};1H\r\x1b[K`);
-    this.writePart(session, "│ ", { color: THEME.systemColor });
+    this.writePart(session, "│ ", { color: theme.border });
     this.writePart(session, session.user.name, { gradient: session.usernameGradient });
-    this.writePart(session, " > ", { color: THEME.white });
-    this.writePart(session, input, { color: THEME.white });
-    this.writePart(session, padding, { color: THEME.systemColor });
-    this.writePart(session, " │", { color: THEME.systemColor });
+    this.writePart(session, " > ", { color: theme.foreground });
+    this.writePart(session, input, { color: theme.foreground });
+    this.writePart(session, padding, { color: theme.muted });
+    this.writePart(session, " │", { color: theme.border });
     this.write(session.shell, `\x1b[${String(session.term.rows)};1H\r\x1b[K`);
-    this.writePart(session, `└${"─".repeat(width - 2)}┘`, { color: THEME.systemColor });
+    this.writePart(session, `╰${"─".repeat(width - 2)}╯`, { color: theme.border });
 
     const cursorColumn = 3 + promptWidth + visibleWidth(input);
     this.write(session.shell, `\x1b[${String(inputRow)};${String(cursorColumn)}H`);
@@ -176,12 +274,206 @@ export class TerminalRenderer {
     return session.term.rows >= 5 && session.term.cols >= 30;
   }
 
+  private hasFramedLayout(session: UserSession): boolean {
+    return session.term.rows >= 11 && session.term.cols >= 42;
+  }
+
   private messageBottom(session: UserSession): number {
-    return this.hasComposer(session) ? session.term.rows - 3 : Math.max(1, session.term.rows - 1);
+    return this.hasFramedLayout(session)
+      ? session.term.rows - 3
+      : this.hasComposer(session)
+        ? session.term.rows - 3
+        : Math.max(1, session.term.rows - 1);
   }
 
   writeStyled(session: UserSession, text: string, style: TextStyle): void {
     this.writePart(session, text, style);
+  }
+
+  private applyScreenTheme(session: UserSession): void {
+    const theme = this.theme(session);
+    this.write(
+      session.shell,
+      `\x1b]10;${theme.foreground}${OSC_TERMINATOR}\x1b]11;${theme.background}${OSC_TERMINATOR}\x1b]12;${theme.accent}${OSC_TERMINATOR}`,
+    );
+  }
+
+  private renderChannelList(session: UserSession): void {
+    const state = session.channelList;
+    if (state === null) return;
+
+    const channels = session.chatRoom.listChannelDetails();
+    const { cols, rows } = session.term;
+    const theme = this.theme(session);
+    const footerTop = Math.max(4, rows - 2);
+    const firstEntryRow = 4;
+    const pageSize = Math.max(1, Math.floor((footerTop - firstEntryRow) / 2));
+    state.selected = Math.min(state.selected, Math.max(0, channels.length - 1));
+    const pageStart = Math.floor(state.selected / pageSize) * pageSize;
+    const visibleChannels = channels.slice(pageStart, pageStart + pageSize);
+
+    this.write(session.shell, "\x1b[r\x1b[2J\x1b[H");
+    this.applyScreenTheme(session);
+    this.writeStaticRow(session, 1, topBorder(cols, " CHANNEL DIRECTORY "), {
+      gradient: theme.bannerGradient,
+    });
+    this.writeStaticRow(
+      session,
+      2,
+      boxBorder(cols, `${String(channels.length)} rooms  ·  browse the Beanroom`),
+      { color: theme.highlight },
+    );
+    this.writeStaticRow(session, 3, ruleBorder(cols, " select a room "), { color: theme.border });
+
+    let row = firstEntryRow;
+    for (const [offset, channel] of visibleChannels.entries()) {
+      const index = pageStart + offset;
+      const selected = index === state.selected;
+      this.writeStaticRow(
+        session,
+        row,
+        boxBorder(
+          cols,
+          `${selected ? "›" : " "} #${channel.name}  ·  ${String(channel.count())} online`,
+        ),
+        { color: selected ? theme.warm : theme.foreground },
+      );
+      this.writeStaticRow(session, row + 1, boxBorder(cols, `    ${channel.description}`), {
+        color: selected ? theme.highlight : theme.muted,
+      });
+      row += 2;
+    }
+    while (row < footerTop) {
+      this.writeStaticRow(session, row, boxBorder(cols, ""), { color: theme.border });
+      row += 1;
+    }
+
+    this.writeStaticRow(session, footerTop, ruleBorder(cols, " ↑/↓ or j/k to move "), {
+      color: theme.border,
+    });
+    this.writeStaticRow(session, footerTop + 1, boxBorder(cols, " enter joins  ·  q / esc returns to chat "), {
+      color: theme.highlight,
+    });
+    this.writeStaticRow(session, rows, `╰${"─".repeat(Math.max(0, cols - 2))}╯`, {
+      color: theme.border,
+    });
+  }
+
+  private drawFrame(session: UserSession): void {
+    const { cols } = session.term;
+    this.drawFrameHeader(session);
+
+    for (let row = 5; row <= this.messageBottom(session); row += 1) {
+      this.writeStaticRow(session, row, boxBorder(cols, ""), { color: this.theme(session).border });
+    }
+  }
+
+  private drawFrameHeader(session: UserSession): void {
+    const { cols } = session.term;
+    const theme = this.theme(session);
+    const channel = session.currentChannel?.name ?? "general";
+    const members = session.currentChannel?.count() ?? 0;
+    const beanAtTop = this.beanAnimations.get(session.shell)?.atTop ?? true;
+    const bean = "  🫘  ";
+    const status = `beanroom  ·  #${channel}  ·  ${String(members)} online  ·  type /help`;
+
+    this.writeStaticRow(session, 1, topBorder(cols, ` BEANROOM // ${theme.label} `), {
+      gradient: theme.bannerGradient,
+    });
+    this.writeStaticRow(
+      session,
+      2,
+      boxBorder(cols, `${beanAtTop ? bean : " ".repeat(bean.length)}${status}`),
+      { color: theme.highlight },
+    );
+    this.writeStaticRow(
+      session,
+      3,
+      boxBorder(
+        cols,
+        `${beanAtTop ? " ".repeat(bean.length) : bean}a tiny bean drifting through the room`,
+      ),
+      { color: theme.accent },
+    );
+    this.writeStaticRow(
+      session,
+      4,
+      ruleBorder(cols, " activity feed  ·  say hello  ·  stay awhile "),
+      {
+        color: theme.border,
+      },
+    );
+  }
+
+  private writeFramedParts(
+    session: UserSession,
+    parts: { text: string; style?: TextStyle }[],
+  ): void {
+    const contentWidth = session.term.cols - 4;
+    const lines: { text: string; style?: TextStyle }[][] = [[]];
+    let remaining = contentWidth;
+
+    for (const part of parts) {
+      const characters = Array.from(part.text);
+      while (characters.length > 0) {
+        if (remaining === 0) {
+          lines.push([]);
+          remaining = contentWidth;
+        }
+        const chunk = characters.splice(0, remaining).join("");
+        const line = lines[lines.length - 1];
+        if (line !== undefined) {
+          line.push(
+            part.style === undefined ? { text: chunk } : { text: chunk, style: part.style },
+          );
+        }
+        remaining -= visibleWidth(chunk);
+      }
+    }
+
+    for (const line of lines) {
+      this.write(session.shell, "\x1b[S");
+      this.write(session.shell, `\x1b[${String(this.messageBottom(session))};1H\r`);
+      this.writeFramedLine(session, line);
+    }
+  }
+
+  private writeFramedLine(
+    session: UserSession,
+    parts: { text: string; style?: TextStyle }[],
+  ): void {
+    const theme = this.theme(session);
+    const contentWidth = session.term.cols - 4;
+    const used = parts.reduce((width, part) => width + visibleWidth(part.text), 0);
+    this.writePart(session, "│ ", { color: theme.border });
+    for (const part of parts) this.writePart(session, part.text, part.style);
+    this.writePart(session, " ".repeat(Math.max(0, contentWidth - used)), { color: theme.muted });
+    this.writePart(session, " │", { color: theme.border });
+  }
+
+  private writeStaticRow(session: UserSession, row: number, text: string, style: TextStyle): void {
+    this.write(session.shell, `\x1b[${String(row)};1H\r\x1b[K`);
+    this.writePart(session, text, style);
+  }
+
+  private theme(session: UserSession): (typeof UI_THEMES)[UiThemeName] {
+    return UI_THEMES[session.theme];
+  }
+
+  private startBeanAnimation(session: UserSession): void {
+    const previous = this.beanAnimations.get(session.shell);
+    if (previous !== undefined) clearInterval(previous.timer);
+
+    const animation = {
+      atTop: true,
+      timer: setInterval(() => {
+        const current = this.beanAnimations.get(session.shell);
+        if (current === undefined) return;
+        current.atTop = !current.atTop;
+        this.refreshFrameHeader(session);
+      }, 700),
+    };
+    this.beanAnimations.set(session.shell, animation);
   }
 
   private writePart(session: UserSession, text: string, style: TextStyle = {}): void {
@@ -204,19 +496,109 @@ export class TerminalRenderer {
 
 export class InputHandler {
   private escapeSequence = "";
+  private escapeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly session: UserSession,
     private readonly onSubmit: (message: string) => void,
+    private readonly onSelectChannel?: (channelName: string) => void,
   ) {}
 
   handle(data: Buffer): void {
     for (const character of data.toString("utf8")) this.handleCharacter(character);
   }
 
+  private consumeEscapeSequence(character: string): boolean {
+    if (character === "\x1b") {
+      this.escapeSequence += "\x1b";
+      this.armEscapeTimeout();
+      return true;
+    }
+    if (this.escapeSequence.length === 0) return false;
+    if (this.escapeSequence.length === 1 && !isSequenceIntroducer(character)) {
+      // Lone ESC followed by a non-introducer = an Alt-modified key. Drop both.
+      this.escapeSequence = "";
+      this.clearEscapeTimeout();
+      return true;
+    }
+    this.escapeSequence += character;
+    if (this.session.channelList !== null) {
+      if (this.escapeSequence === "\x1b[A" || this.escapeSequence === "\x1bOA") {
+        this.session.renderer.moveChannelList(this.session, -1);
+        this.escapeSequence = "";
+        this.clearEscapeTimeout();
+        return true;
+      }
+      if (this.escapeSequence === "\x1b[B" || this.escapeSequence === "\x1bOB") {
+        this.session.renderer.moveChannelList(this.session, 1);
+        this.escapeSequence = "";
+        this.clearEscapeTimeout();
+        return true;
+      }
+    }
+    if (this.escapeSequence.length > 32 || isSequenceTerminator(character)) {
+      this.escapeSequence = "";
+      this.clearEscapeTimeout();
+    } else {
+      this.armEscapeTimeout();
+    }
+    return true;
+  }
+
+  private armEscapeTimeout(): void {
+    if (this.escapeTimer !== null) clearTimeout(this.escapeTimer);
+    this.escapeTimer = setTimeout(() => {
+      this.escapeTimer = null;
+      if (this.escapeSequence === "\x1b") {
+        if (this.session.channelList !== null) {
+          this.session.renderer.closeChannelList(this.session);
+        }
+      }
+      this.escapeSequence = "";
+    }, 25);
+  }
+
+  private clearEscapeTimeout(): void {
+    if (this.escapeTimer !== null) {
+      clearTimeout(this.escapeTimer);
+      this.escapeTimer = null;
+    }
+  }
+
   private handleCharacter(character: string): void {
     if (this.consumeEscapeSequence(character)) return;
+
+    if (this.session.channelList !== null) {
+      if (character === "k" || character === "K") {
+        this.session.renderer.moveChannelList(this.session, -1);
+        return;
+      }
+      if (character === "j" || character === "J") {
+        this.session.renderer.moveChannelList(this.session, 1);
+        return;
+      }
+      if (character === "q" || character === "Q") {
+        this.session.renderer.closeChannelList(this.session);
+        return;
+      }
+      if (character === "\r" || character === "\n") {
+        const selected = this.session.renderer.selectedChannelName(this.session);
+        if (selected !== undefined && this.onSelectChannel !== undefined) {
+          this.onSelectChannel(selected);
+        } else {
+          this.session.renderer.closeChannelList(this.session);
+        }
+        return;
+      }
+      if (character === "\x03") {
+        this.session.renderer.closeChannelList(this.session);
+        return;
+      }
+      return;
+    }
+
     if (character === "\r" || character === "\n") {
+      this.session.currentChannel?.setTyping(this.session.id, false);
       const message = this.session.inputBuffer.trim();
       this.session.inputBuffer = "";
       if (message.length > 0) this.onSubmit(message);
@@ -225,10 +607,16 @@ export class InputHandler {
     }
     if (character === "\x7f" || character === "\x08") {
       this.session.inputBuffer = this.session.inputBuffer.slice(0, -1);
+      if (this.session.inputBuffer.length === 0 || this.session.inputBuffer.startsWith("/")) {
+        this.session.currentChannel?.setTyping(this.session.id, false);
+      } else {
+        this.session.currentChannel?.setTyping(this.session.id, true);
+      }
       this.session.renderer.renderPrompt(this.session);
       return;
     }
     if (character === "\x03") {
+      this.session.currentChannel?.setTyping(this.session.id, false);
       this.close();
       return;
     }
@@ -238,6 +626,11 @@ export class InputHandler {
       !isControlCharacter(character)
     ) {
       this.session.inputBuffer += character;
+      if (!this.session.inputBuffer.startsWith("/")) {
+        this.session.currentChannel?.setTyping(this.session.id, true);
+      } else {
+        this.session.currentChannel?.setTyping(this.session.id, false);
+      }
       this.session.renderer.renderPrompt(this.session);
     }
   }
@@ -245,23 +638,6 @@ export class InputHandler {
   private close(): void {
     this.session.renderer.close(this.session.shell);
     this.session.shell.end();
-  }
-
-  private consumeEscapeSequence(character: string): boolean {
-    if (this.escapeSequence.length > 0) {
-      this.escapeSequence += character;
-      if (this.escapeSequence.length > 2 && isEscapeSequenceFinal(character)) {
-        this.escapeSequence = "";
-      } else if (this.escapeSequence.length > 32) {
-        this.escapeSequence = "";
-      }
-      return true;
-    }
-    if (character.codePointAt(0) === 27) {
-      this.escapeSequence = character;
-      return true;
-    }
-    return false;
   }
 }
 
@@ -351,9 +727,14 @@ function isControlCharacter(character: string): boolean {
   return code < 32 || code === 127;
 }
 
-function isEscapeSequenceFinal(character: string): boolean {
+function isSequenceIntroducer(character: string): boolean {
+  return '[]OPX^_()#%!*+"'.includes(character);
+}
+
+function isSequenceTerminator(character: string): boolean {
+  if (character === "\x07") return true;
   const code = character.codePointAt(0) ?? 0;
-  return code >= 64 && code <= 126;
+  return code >= 64 && code <= 126 && !isSequenceIntroducer(character);
 }
 
 function visibleWidth(text: string): number {
@@ -364,7 +745,22 @@ function truncate(text: string, width: number): string {
   return Array.from(text).slice(0, width).join("");
 }
 
-function topBorder(width: number): string {
-  const label = "─ BEANROOM ";
-  return `┌${label}${"─".repeat(Math.max(0, width - label.length - 2))}┐`;
+function topBorder(width: number, label: string): string {
+  const innerWidth = Math.max(0, width - 2);
+  const text = truncate(label, innerWidth);
+  return `╭${text}${"─".repeat(Math.max(0, innerWidth - visibleWidth(text)))}╮`;
+}
+
+function ruleBorder(width: number, label: string): string {
+  const innerWidth = Math.max(0, width - 2);
+  const text = truncate(label, innerWidth);
+  const left = Math.floor(Math.max(0, innerWidth - visibleWidth(text)) / 2);
+  const right = Math.max(0, innerWidth - visibleWidth(text) - left);
+  return `├${"─".repeat(left)}${text}${"─".repeat(right)}┤`;
+}
+
+function boxBorder(width: number, content: string): string {
+  const innerWidth = Math.max(0, width - 4);
+  const text = truncate(content, innerWidth);
+  return `│ ${text}${" ".repeat(Math.max(0, innerWidth - visibleWidth(text)))} │`;
 }

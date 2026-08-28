@@ -1,10 +1,8 @@
-import { AuthService } from "../helpers/auth.js";
+import { authService } from "../helpers/auth.js";
 
 import { reply } from "./output.js";
 
 import type { UserSession } from "../types/session.js";
-
-const authService = new AuthService();
 
 export default async function command(session: UserSession, args: string[]): Promise<void> {
   const sanitizedArgs = args.map((a) => a.trim()).slice(0, 3);

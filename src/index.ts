@@ -36,5 +36,7 @@ process.on("SIGINT", () => {
       // empty catch block
     }
   }
-  process.exit(0);
+  void chatRoom.flushAll().finally(() => {
+    process.exit(0);
+  });
 });
