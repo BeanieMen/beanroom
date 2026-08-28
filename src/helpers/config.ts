@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  host: "127.0.0.1",
+  host: "0.0.0.0",
   port: 2222,
   historyLimit: 10,
   maxMessageLength: 512,
