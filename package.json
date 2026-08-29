@@ -8,7 +8,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/index.ts --outfile dist/beanroom --compile --target=bun"
   },
   "devDependencies": {
     "@types/bcryptjs": "2.4.6",

@@ -6,6 +6,11 @@ You don't need an account chat. If you want to be recognizable, `/register` a us
 
 also: be nice. that's the first rule. just be a good human being.
 
+## prerequisities
+- bun
+- node
+
+
 ## why?
 
 `ssh` is already on every machine you own, and there's something genuinely fun about a chatroom that feels like something retro.
@@ -21,6 +26,31 @@ also: be nice. that's the first rule. just be a good human being.
 ```sh
 ssh beanoni.xyz -p 2222
 ```
+
+## how to run locally
+first clone my repo by
+
+```
+git clone https://github.com/BeanieMen/beanroom/
+cd beanroom
+````
+
+then install deps and build binary (THIS STEP REQUIRES BUN)
+
+```
+bun i
+bun run build
+```
+
+run the binary
+
+```
+./dist/beanroom
+```
+
+the program autogenerates a ssh server key at `ssh_host_ed25519_key`
+you can do `ssh-keygen -t ed25519` to generate a key yourself
+
 
 # technologia
 

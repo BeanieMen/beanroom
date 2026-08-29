@@ -1,11 +1,26 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+
+import { utils } from "ssh2";
 
 import { ChatRoom } from "./chat/chatroom.js";
 import { APP_CONFIG } from "./helpers/config.js";
 import { logger } from "./helpers/logger.js";
 import { createSshServer } from "./helpers/server.js";
 
-const hostKeys = [readFileSync("ssh_host_ed25519_key")];
+const KEY_FILE = "ssh_host_ed25519_key";
+
+function loadOrCreateHostKeys(): Buffer[] {
+  if (!existsSync(KEY_FILE)) {
+    logger.info(`[index] SSH host key "${KEY_FILE}" not found. Generating new Ed25519 key...`);
+    const keyPair = utils.generateKeyPairSync("ed25519");
+    writeFileSync(KEY_FILE, keyPair.private, { mode: 0o600 });
+    writeFileSync(`${KEY_FILE}.pub`, keyPair.public, { mode: 0o644 });
+    logger.info(`[index] Generated and saved host key to ${KEY_FILE}`);
+  }
+  return [readFileSync(KEY_FILE)];
+}
+
+const hostKeys = loadOrCreateHostKeys();
 
 logger.info(`[index] creating ChatRoom`);
 const chatRoom = new ChatRoom();
