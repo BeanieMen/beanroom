@@ -233,6 +233,7 @@ export class TerminalRenderer {
 
   withMessageCursor(session: UserSession, writeMessage: () => void): void {
     const messageRow = this.messageBottom(session);
+    this.write(session.shell, "\x1b[?25l");
     this.setScrollRegion(session);
     this.write(
       session.shell,
@@ -242,6 +243,7 @@ export class TerminalRenderer {
     );
     writeMessage();
     this.restorePromptCursor(session);
+    this.write(session.shell, "\x1b[?25h");
   }
 
   private setScrollRegion(session: UserSession): void {
@@ -625,7 +627,10 @@ export class TerminalRenderer {
         const current = this.beanAnimations.get(session.shell);
         if (current === undefined) return;
         current.atTop = !current.atTop;
+        // Hide cursor (\x1b[?25l) before moving to header, draw header, restore prompt position, then show cursor (\x1b[?25h)
+        this.write(session.shell, "\x1b[?25l");
         this.refreshFrameHeader(session);
+        this.write(session.shell, "\x1b[?25h");
       }, 700),
     };
     this.beanAnimations.set(session.shell, animation);
