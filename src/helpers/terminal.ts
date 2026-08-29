@@ -227,14 +227,12 @@ export class TerminalRenderer {
 
   refreshFrameHeader(session: UserSession): void {
     if (session.channelList !== null || !this.hasFramedLayout(session)) return;
-    this.write(session.shell, "\x1b[s");
     this.drawFrameHeader(session);
-    this.write(session.shell, "\x1b[u");
+    this.restorePromptCursor(session);
   }
 
   withMessageCursor(session: UserSession, writeMessage: () => void): void {
     const messageRow = this.messageBottom(session);
-    this.write(session.shell, "\x1b[s");
     this.setScrollRegion(session);
     this.write(
       session.shell,
@@ -243,7 +241,7 @@ export class TerminalRenderer {
         : `\x1b[${String(messageRow)};1H\r\x1b[K`,
     );
     writeMessage();
-    this.write(session.shell, "\x1b[u");
+    this.restorePromptCursor(session);
   }
 
   private setScrollRegion(session: UserSession): void {
@@ -521,12 +519,23 @@ export class TerminalRenderer {
     this.writeAt(session, startRow + currentOffset, startCol, bottomLine, { color: theme.border });
 
     // Restore cursor position back to the prompt line after drawing popup
+    this.restorePromptCursor(session);
+  }
+
+  private restorePromptCursor(session: UserSession): void {
+    if (session.channelList !== null) return;
     if (this.hasFramedLayout(session) || this.hasComposer(session)) {
       const inputRow = session.term.rows - 1;
       const promptWidth = visibleWidth(session.user.name) + 3;
-      const input = truncate(session.inputBuffer, Math.max(0, session.term.cols - 4 - promptWidth));
+      const bodyWidth = session.term.cols - 4;
+      const input = truncate(session.inputBuffer, Math.max(0, bodyWidth - promptWidth));
       const cursorColumn = 3 + promptWidth + visibleWidth(input);
       this.write(session.shell, `\x1b[${String(inputRow)};${String(cursorColumn)}H`);
+    } else {
+      const row = Math.max(1, session.term.rows);
+      const promptWidth = visibleWidth(session.user.name) + 3;
+      const cursorColumn = 1 + promptWidth + visibleWidth(session.inputBuffer);
+      this.write(session.shell, `\x1b[${String(row)};${String(cursorColumn)}H`);
     }
   }
 
