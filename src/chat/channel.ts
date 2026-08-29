@@ -7,7 +7,7 @@ import type { HistoryService } from "./history.js";
 import type { UserSession } from "../types/session.js";
 
 export class ChatRoomChannel {
-  private readonly sesssions = new Map<string, UserSession>();
+  private readonly sessions = new Map<string, UserSession>();
   private readonly typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -17,11 +17,11 @@ export class ChatRoomChannel {
   ) {}
 
   join(user: UserSession): void {
-    this.sesssions.set(user.id, user);
+    this.sessions.set(user.id, user);
     user.currentChannel = this;
     this.refreshFrames();
     logger.info(
-      `[channel:${this.name}] join session=${user.id} user=${user.user.name} (members=${this.sesssions.size})`,
+      `[channel:${this.name}] join session=${user.id} user=${user.user.name} (members=${this.sessions.size})`,
     );
 
     user.renderer.redraw(user);
@@ -31,25 +31,25 @@ export class ChatRoomChannel {
   }
 
   leave(sessionId: string): void {
-    const user = this.sesssions.get(sessionId);
+    const user = this.sessions.get(sessionId);
     if (!user) {
       logger.warn(`[channel:${this.name}] leave called for unknown session=${sessionId}`);
       return;
     }
 
     this.setTyping(sessionId, false);
-    this.sesssions.delete(sessionId);
+    this.sessions.delete(sessionId);
     user.currentChannel = null;
     this.refreshFrames();
     logger.info(
-      `[channel:${this.name}] leave session=${sessionId} user=${user.user.name} (members=${this.sesssions.size})`,
+      `[channel:${this.name}] leave session=${sessionId} user=${user.user.name} (members=${this.sessions.size})`,
     );
 
     this.announce(`${user.user.name} has left ${this.name}.`, sessionId);
   }
 
   post(sessionId: string, message: string): void {
-    const sender = this.sesssions.get(sessionId);
+    const sender = this.sessions.get(sessionId);
     if (!sender) {
       logger.warn(`[channel:${this.name}] post from non-member session=${sessionId} dropped`);
       return;
@@ -59,11 +59,11 @@ export class ChatRoomChannel {
     const timestamp = new Date();
 
     logger.info(
-      `[channel:${this.name}] post session=${sessionId} user=${sender.user.name}: "${message}" (members=${this.sesssions.size})`,
+      `[channel:${this.name}] post session=${sessionId} user=${sender.user.name}: "${message}" (members=${this.sessions.size})`,
     );
     this.history.append({ sender: sender.user.name, message, timestamp: timestamp.toISOString() });
 
-    for (const recipient of this.sesssions.values()) {
+    for (const recipient of this.sessions.values()) {
       recipient.renderer.writeUserMessage(
         recipient,
         sender.user.name,
@@ -71,24 +71,23 @@ export class ChatRoomChannel {
         sender.usernameGradient,
         formatTimestamp(timestamp),
       );
-      recipient.renderer.renderPrompt(recipient);
     }
   }
 
   count(): number {
-    return this.sesssions.size;
+    return this.sessions.size;
   }
 
   all(): UserSession[] {
-    return [...this.sesssions.values()];
+    return [...this.sessions.values()];
   }
 
   has(sessionId: string): boolean {
-    return this.sesssions.has(sessionId);
+    return this.sessions.has(sessionId);
   }
 
   setTyping(sessionId: string, isTyping: boolean): void {
-    if (!this.sesssions.has(sessionId)) return;
+    if (!this.sessions.has(sessionId)) return;
     const existing = this.typingTimers.get(sessionId);
     if (existing !== undefined) clearTimeout(existing);
 
@@ -111,7 +110,7 @@ export class ChatRoomChannel {
   typingIndicatorFor(sessionId: string): string | undefined {
     const names = [...this.typingTimers.keys()]
       .filter((id) => id !== sessionId)
-      .map((id) => this.sesssions.get(id)?.user.name)
+      .map((id) => this.sessions.get(id)?.user.name)
       .filter((name): name is string => name !== undefined);
 
     if (names.length === 0) return undefined;
@@ -129,15 +128,14 @@ export class ChatRoomChannel {
     const timestamp = new Date();
 
     logger.debug(
-      `[channel:${this.name}] announce: "${message}" (excluded=${excludedSessionId ?? "none"}, members=${this.sesssions.size})`,
+      `[channel:${this.name}] announce: "${message}" (excluded=${excludedSessionId ?? "none"}, members=${this.sessions.size})`,
     );
     this.history.append({ sender: "system", message, timestamp: timestamp.toISOString() });
-    for (const recipient of this.sesssions.values()) {
+    for (const recipient of this.sessions.values()) {
       if (recipient.id === excludedSessionId) continue;
       recipient.renderer.writeLine(recipient, `${formatTimestamp(timestamp)} ${message}`, {
         color: UI_THEMES[recipient.theme].muted,
       });
-      recipient.renderer.renderPrompt(recipient);
     }
   }
 
@@ -174,10 +172,10 @@ export class ChatRoomChannel {
   }
 
   private refreshFrames(): void {
-    for (const session of this.sesssions.values()) session.renderer.refreshFrameHeader(session);
+    for (const session of this.sessions.values()) session.renderer.refreshFrameHeader(session);
   }
 
   private refreshTypingIndicators(): void {
-    for (const session of this.sesssions.values()) session.renderer.renderPrompt(session);
+    for (const session of this.sessions.values()) session.renderer.renderPrompt(session);
   }
 }

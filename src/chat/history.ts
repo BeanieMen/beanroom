@@ -91,18 +91,22 @@ function clean(value: string, limit: number): string {
 
 function parseEntry(line: string): ChatLogEntry[] {
   try {
-    const entry = JSON.parse(line);
-    if (
-      typeof entry === "object" &&
-      entry !== null &&
-      typeof (entry as Record<string, unknown>)["sender"] === "string" &&
-      typeof (entry as Record<string, unknown>)["message"] === "string" &&
-      typeof (entry as Record<string, unknown>)["timestamp"] === "string"
-    ) {
-      return [entry as ChatLogEntry];
+    const entry: unknown = JSON.parse(line);
+    if (isChatLogEntry(entry)) {
+      return [entry];
     }
   } catch {
     // A bad log line should never stop the room from opening.
   }
   return [];
+}
+
+function isChatLogEntry(entry: unknown): entry is ChatLogEntry {
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    typeof (entry as ChatLogEntry).sender === "string" &&
+    typeof (entry as ChatLogEntry).message === "string" &&
+    typeof (entry as ChatLogEntry).timestamp === "string"
+  );
 }

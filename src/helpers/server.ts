@@ -11,7 +11,7 @@ import {
   type WindowChangeInfo,
 } from "ssh2";
 
-import { handleCommand } from "../commands/handler.js";
+import { handleCommand } from "../commands/index.js";
 import { User } from "../types/user.js";
 
 import { DEFAULT_THEME } from "./config.js";

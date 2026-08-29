@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
 
 import { ChatRoom } from "./chat/chatroom.js";
 import { APP_CONFIG } from "./helpers/config.js";

@@ -1,18 +1,20 @@
 import { logger } from "../helpers/logger.js";
 
-import { reply } from "./output.js";
-
 import type { UserSession } from "../types/session.js";
 
-export default async function command(session: UserSession, args: string[]): Promise<void> {
-  await Promise.resolve();
+function reply(session: UserSession, message: string): void {
+  session.renderer.writeLine(session, message);
+  session.renderer.renderPrompt(session);
+}
+
+export function joinCommand(session: UserSession, args: string[]): void {
   const target = (args[0] ?? "").trim();
   if (target.length === 0) {
     reply(session, "Usage: /join <channel> [description]");
     return;
   }
   if (!/^[a-z0-9][a-z0-9_-]{0,23}$/i.test(target)) {
-    reply(session, "Channel names use letters, numbers, underscores, and hyphens (max 24). ");
+    reply(session, "Channel names use letters, numbers, underscores, and hyphens (max 24).");
     return;
   }
 
@@ -36,4 +38,18 @@ export default async function command(session: UserSession, args: string[]): Pro
     `[join] session=${session.id} moved ${session.user.name} ${current?.name ?? "(none)"} -> ${target}`,
   );
   reply(session, created ? `Created and joined #${target}.` : `Joined channel "${target}".`);
+}
+
+export function listCommand(session: UserSession): void {
+  session.renderer.openChannelList(session);
+}
+
+export function channelsCommand(session: UserSession): void {
+  const names = session.chatRoom.listChannels();
+  const current = session.currentChannel?.name ?? "(none)";
+  if (names.length === 0) {
+    reply(session, "No channels exist yet.");
+    return;
+  }
+  reply(session, `Channels: ${names.join(", ")} (current: ${current})`);
 }

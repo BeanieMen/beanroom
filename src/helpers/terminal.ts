@@ -49,6 +49,7 @@ export class TerminalRenderer {
     ServerChannel,
     { atTop: boolean; timer: ReturnType<typeof setInterval> }
   >();
+  private readonly lastTypingLabels = new Map<ServerChannel, string>();
 
   open(session: UserSession): void {
     this.write(session.shell, ALT_BUFFER_ENTER);
@@ -62,7 +63,7 @@ export class TerminalRenderer {
       clearInterval(animation.timer);
       this.beanAnimations.delete(shell);
     }
-    // Restore the user's terminal colours after leaving the alternate buffer.
+    this.lastTypingLabels.delete(shell);
     this.write(
       shell,
       `\x1b[r\x1b]110${OSC_TERMINATOR}\x1b]111${OSC_TERMINATOR}\x1b]112${OSC_TERMINATOR}${ALT_BUFFER_LEAVE}`,
@@ -147,7 +148,7 @@ export class TerminalRenderer {
       return;
     }
     this.withMessageCursor(session, () => {
-      this.writeStyled(session, text, style);
+      this.writePart(session, text, style);
       this.write(session.shell, "\r\n");
     });
     if (!skipPopup && session.activePopup !== null) this.renderPopup(session);
@@ -179,13 +180,8 @@ export class TerminalRenderer {
       this.renderChannelList(session);
       return;
     }
-    if (this.hasFramedLayout(session)) {
-      this.renderComposer(session);
-      if (session.activePopup !== null) this.renderPopup(session);
-      return;
-    }
-    if (this.hasComposer(session)) {
-      this.renderComposer(session);
+    if (this.hasFramedLayout(session) || this.hasComposer(session)) {
+      this.renderComposer(session, false);
       if (session.activePopup !== null) this.renderPopup(session);
       return;
     }
@@ -224,7 +220,11 @@ export class TerminalRenderer {
     if (session.currentChannel !== null) {
       session.currentChannel.replayHistory(session, true);
     }
-    this.renderPrompt(session);
+    if (this.hasFramedLayout(session) || this.hasComposer(session)) {
+      this.renderComposer(session, true);
+    } else {
+      this.renderPrompt(session);
+    }
     if (session.activePopup !== null) {
       this.renderPopup(session);
     }
@@ -305,7 +305,7 @@ export class TerminalRenderer {
     if (!skipPopup && session.activePopup !== null) this.renderPopup(session);
   }
 
-  private renderComposer(session: UserSession): void {
+  private renderComposer(session: UserSession, full = false): void {
     const topRow = session.term.rows - 2;
     const inputRow = session.term.rows - 1;
     const width = session.term.cols;
@@ -315,23 +315,40 @@ export class TerminalRenderer {
     const input = truncate(session.inputBuffer, Math.max(0, bodyWidth - promptWidth));
     const padding = " ".repeat(Math.max(0, bodyWidth - promptWidth - visibleWidth(input)));
 
-    this.write(session.shell, `\x1b[${String(topRow)};1H\r\x1b[K`);
     const typing = session.currentChannel?.typingIndicatorFor(session.id);
     const composerLabel = typing
       ? ` ${typing}  ·  compose  ·  enter sends `
       : " compose  ·  enter sends  ·  /help for commands ";
-    this.writePart(session, ruleBorder(width, composerLabel), {
-      color: theme.border,
-    });
-    this.write(session.shell, `\x1b[${String(inputRow)};1H\r\x1b[K`);
-    this.writePart(session, "│ ", { color: theme.border });
-    this.writePart(session, session.user.name, { gradient: session.usernameGradient });
-    this.writePart(session, " > ", { color: theme.foreground });
-    this.writePart(session, input, { color: theme.foreground });
-    this.writePart(session, padding, { color: theme.muted });
-    this.writePart(session, " │", { color: theme.border });
-    this.write(session.shell, `\x1b[${String(session.term.rows)};1H\r\x1b[K`);
-    this.writePart(session, `╰${"─".repeat(width - 2)}╯`, { color: theme.border });
+
+    const lastLabel = this.lastTypingLabels.get(session.shell);
+    const labelChanged = lastLabel !== composerLabel;
+
+    if (full || labelChanged) {
+      this.lastTypingLabels.set(session.shell, composerLabel);
+      this.write(session.shell, `\x1b[${String(topRow)};1H\r\x1b[K`);
+      this.writePart(session, ruleBorder(width, composerLabel), {
+        color: theme.border,
+      });
+    }
+
+    if (full) {
+      this.write(session.shell, `\x1b[${String(inputRow)};1H\r\x1b[K`);
+      this.writePart(session, "│ ", { color: theme.border });
+      this.writePart(session, session.user.name, { gradient: session.usernameGradient });
+      this.writePart(session, " > ", { color: theme.foreground });
+      this.writePart(session, input, { color: theme.foreground });
+      this.writePart(session, padding, { color: theme.muted });
+      this.writePart(session, " │", { color: theme.border });
+
+      this.write(session.shell, `\x1b[${String(session.term.rows)};1H\r\x1b[K`);
+      this.writePart(session, `╰${"─".repeat(width - 2)}╯`, { color: theme.border });
+    } else {
+      this.write(session.shell, `\x1b[${String(inputRow)};3H`);
+      this.writePart(session, session.user.name, { gradient: session.usernameGradient });
+      this.writePart(session, " > ", { color: theme.foreground });
+      this.writePart(session, input, { color: theme.foreground });
+      this.writePart(session, padding, { color: theme.muted });
+    }
 
     const cursorColumn = 3 + promptWidth + visibleWidth(input);
     this.write(session.shell, `\x1b[${String(inputRow)};${String(cursorColumn)}H`);
@@ -485,12 +502,10 @@ export class TerminalRenderer {
     const { cols, rows } = session.term;
     const theme = this.theme(session);
 
-    // Calculate dimensions
     const maxWidth = Math.max(30, cols - 6);
     const boxWidth = Math.min(68, maxWidth);
 
-    // Wrap popup body lines to fit inside box
-    const innerWidth = boxWidth - 4; // 2 padding/border each side
+    const innerWidth = boxWidth - 4;
     const wrappedLines: { text: string; indent?: boolean }[] = [];
     for (const rawLine of popup.lines) {
       if (rawLine === "") {
@@ -521,19 +536,17 @@ export class TerminalRenderer {
     const headerHeight = popup.author || popup.timeAgo ? 2 : 1;
     const footerHeight = popup.controlsHint ? 2 : 1;
     const contentHeight = wrappedLines.length;
-    const boxHeight = headerHeight + contentHeight + footerHeight + 1; // +1 top border
+    const boxHeight = headerHeight + contentHeight + footerHeight + 1;
 
     const startRow = Math.max(2, Math.floor((rows - boxHeight) / 2));
     const startCol = Math.max(1, Math.floor((cols - boxWidth) / 2));
 
-    // Top border with title
     const titleStr = popup.title;
     const topText = topBorder(boxWidth, ` ${titleStr} `);
     this.writeAt(session, startRow, startCol, topText, { color: theme.border });
 
     let currentOffset = 1;
 
-    // Optional author line
     if (popup.author || popup.timeAgo) {
       const authorPart = popup.author ? `@${popup.author}` : "";
       const timePart = popup.timeAgo ? ` ${popup.timeAgo}` : "";
@@ -546,7 +559,6 @@ export class TerminalRenderer {
       currentOffset += 1;
     }
 
-    // Body lines
     for (const item of wrappedLines) {
       const lineStr = item.text;
       const isBullet = lineStr.trim().startsWith("•") || lineStr.trim().startsWith("-");
@@ -558,7 +570,6 @@ export class TerminalRenderer {
       currentOffset += 1;
     }
 
-    // Controls hint
     if (popup.controlsHint) {
       const hintLine = ruleBorder(boxWidth, ` ${popup.controlsHint} `);
       this.writeAt(session, startRow + currentOffset, startCol, hintLine, {
@@ -568,11 +579,9 @@ export class TerminalRenderer {
       currentOffset += 1;
     }
 
-    // Bottom border
     const bottomLine = `╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`;
     this.writeAt(session, startRow + currentOffset, startCol, bottomLine, { color: theme.border });
 
-    // Restore cursor position back to the prompt line after drawing popup
     this.restorePromptCursor(session);
   }
 
@@ -679,10 +688,39 @@ export class TerminalRenderer {
         const current = this.beanAnimations.get(session.shell);
         if (current === undefined) return;
         current.atTop = !current.atTop;
-        this.refreshFrameHeader(session);
+        this.animateBeanOnly(session);
       }, 700),
     };
     this.beanAnimations.set(session.shell, animation);
+  }
+
+  private animateBeanOnly(session: UserSession): void {
+    if (session.channelList !== null || !this.hasFramedLayout(session)) return;
+    const beanAtTop = this.beanAnimations.get(session.shell)?.atTop ?? true;
+    const theme = this.theme(session);
+    const bean = "  🫘  ";
+    const spaces = " ".repeat(bean.length);
+
+    const topBean = beanAtTop ? bean : spaces;
+    const bottomBean = beanAtTop ? spaces : bean;
+
+    const topStyled = colorText(topBean, theme.highlight, session.colorLevel);
+    const bottomStyled = colorText(bottomBean, theme.accent, session.colorLevel);
+
+    const inputRow = session.term.rows - 1;
+    const promptWidth = visibleWidth(session.user.name) + 3;
+    const bodyWidth = session.term.cols - 4;
+    const input = truncate(session.inputBuffer, Math.max(0, bodyWidth - promptWidth));
+    const cursorColumn = 3 + promptWidth + visibleWidth(input);
+
+    const seq =
+      "\x1b[?25l" +
+      `\x1b[2;3H${topStyled}${RESET}` +
+      `\x1b[3;3H${bottomStyled}${RESET}` +
+      `\x1b[${String(inputRow)};${String(cursorColumn)}H` +
+      "\x1b[?25h";
+
+    this.write(session.shell, seq);
   }
 
   private writePart(session: UserSession, text: string, style: TextStyle = {}): void {
@@ -725,7 +763,6 @@ export class InputHandler {
     }
     if (this.escapeSequence.length === 0) return false;
     if (this.escapeSequence.length === 1 && !isSequenceIntroducer(character)) {
-      // Lone ESC followed by a non-introducer = an Alt-modified key. Drop both.
       this.escapeSequence = "";
       this.clearEscapeTimeout();
       return true;
@@ -786,14 +823,10 @@ export class InputHandler {
         character === "q" ||
         character === "Q" ||
         character === "\x1b" ||
-        character === " "
+        character === " " ||
+        character === "\x03"
       ) {
         this.session.renderer.closePopup(this.session);
-        return;
-      }
-      if (character === "\x03") {
-        this.session.renderer.closePopup(this.session);
-        return;
       }
       return;
     }
@@ -807,7 +840,7 @@ export class InputHandler {
         this.session.renderer.moveChannelList(this.session, 1);
         return;
       }
-      if (character === "q" || character === "Q") {
+      if (character === "q" || character === "Q" || character === "\x03") {
         this.session.renderer.closeChannelList(this.session);
         return;
       }
@@ -818,10 +851,6 @@ export class InputHandler {
         } else {
           this.session.renderer.closeChannelList(this.session);
         }
-        return;
-      }
-      if (character === "\x03") {
-        this.session.renderer.closeChannelList(this.session);
         return;
       }
       return;
@@ -872,8 +901,7 @@ export class InputHandler {
 }
 
 function colorText(text: string, color: string | undefined, level: ColorSupportLevel): string {
-  if (level === 0) return text;
-  if (color === undefined) return text;
+  if (level === 0 || color === undefined) return text;
   if (color.startsWith("\x1b[")) return `${color}${text}`;
   const [red, green, blue] = hexToRgb(color);
   if (level === 3) return `\x1b[38;2;${String(red)};${String(green)};${String(blue)}m${text}`;
