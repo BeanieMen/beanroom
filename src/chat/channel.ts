@@ -19,12 +19,12 @@ export class ChatRoomChannel {
     this.sesssions.set(user.id, user);
     user.currentChannel = this;
     this.refreshFrames();
-    this.announce(`${user.user.name} has joined ${this.name}.`, user.id);
     logger.info(
       `[channel:${this.name}] join session=${user.id} user=${user.user.name} (members=${this.sesssions.size})`,
     );
 
     this.replayHistory(user);
+    this.announce(`${user.user.name} has joined ${this.name}.`, user.id);
     logger.debug(`[channel:${this.name}] join finished for ${user.user.name}`);
     user.renderer.renderPrompt(user);
   }

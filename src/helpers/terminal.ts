@@ -519,6 +519,15 @@ export class TerminalRenderer {
     // Bottom border
     const bottomLine = `╰${"─".repeat(Math.max(0, boxWidth - 2))}╯`;
     this.writeAt(session, startRow + currentOffset, startCol, bottomLine, { color: theme.border });
+
+    // Restore cursor position back to the prompt line after drawing popup
+    if (this.hasFramedLayout(session) || this.hasComposer(session)) {
+      const inputRow = session.term.rows - 1;
+      const promptWidth = visibleWidth(session.user.name) + 3;
+      const input = truncate(session.inputBuffer, Math.max(0, session.term.cols - 4 - promptWidth));
+      const cursorColumn = 3 + promptWidth + visibleWidth(input);
+      this.write(session.shell, `\x1b[${String(inputRow)};${String(cursorColumn)}H`);
+    }
   }
 
   private writeAt(
