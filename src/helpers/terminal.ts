@@ -227,8 +227,37 @@ export class TerminalRenderer {
 
   refreshFrameHeader(session: UserSession): void {
     if (session.channelList !== null || !this.hasFramedLayout(session)) return;
-    this.drawFrameHeader(session);
-    this.restorePromptCursor(session);
+    const { cols } = session.term;
+    const theme = this.theme(session);
+    const channel = session.currentChannel?.name ?? "general";
+    const members = session.currentChannel?.count() ?? 0;
+    const beanAtTop = this.beanAnimations.get(session.shell)?.atTop ?? true;
+    const bean = "  🫘  ";
+    const status = `beanroom  ·  #${channel}  ·  ${String(members)} online  ·  type /help`;
+
+    const row2Content = boxBorder(cols, `${beanAtTop ? bean : " ".repeat(bean.length)}${status}`);
+    const row3Content = boxBorder(
+      cols,
+      `${beanAtTop ? " ".repeat(bean.length) : bean}a tiny bean drifting through the room`,
+    );
+
+    const row2Styled = colorText(row2Content, theme.highlight, session.colorLevel);
+    const row3Styled = colorText(row3Content, theme.accent, session.colorLevel);
+
+    const inputRow = session.term.rows - 1;
+    const promptWidth = visibleWidth(session.user.name) + 3;
+    const bodyWidth = session.term.cols - 4;
+    const input = truncate(session.inputBuffer, Math.max(0, bodyWidth - promptWidth));
+    const cursorColumn = 3 + promptWidth + visibleWidth(input);
+
+    const seq =
+      "\x1b[?25l" +
+      `\x1b[2;1H\r\x1b[K${row2Styled}${RESET}` +
+      `\x1b[3;1H\r\x1b[K${row3Styled}${RESET}` +
+      `\x1b[${String(inputRow)};${String(cursorColumn)}H` +
+      "\x1b[?25h";
+
+    this.write(session.shell, seq);
   }
 
   withMessageCursor(session: UserSession, writeMessage: () => void): void {
@@ -388,7 +417,19 @@ export class TerminalRenderer {
 
   private drawFrame(session: UserSession): void {
     const { cols } = session.term;
+    const theme = this.theme(session);
+    this.writeStaticRow(session, 1, topBorder(cols, ` BEANROOM // ${theme.label} `), {
+      gradient: theme.bannerGradient,
+    });
     this.drawFrameHeader(session);
+    this.writeStaticRow(
+      session,
+      4,
+      ruleBorder(cols, " activity feed  ·  say hello  ·  stay awhile "),
+      {
+        color: theme.border,
+      },
+    );
 
     for (let row = 5; row <= this.messageBottom(session); row += 1) {
       this.writeStaticRow(session, row, boxBorder(cols, ""), { color: this.theme(session).border });
@@ -404,9 +445,6 @@ export class TerminalRenderer {
     const bean = "  🫘  ";
     const status = `beanroom  ·  #${channel}  ·  ${String(members)} online  ·  type /help`;
 
-    this.writeStaticRow(session, 1, topBorder(cols, ` BEANROOM // ${theme.label} `), {
-      gradient: theme.bannerGradient,
-    });
     this.writeStaticRow(
       session,
       2,
@@ -421,14 +459,6 @@ export class TerminalRenderer {
         `${beanAtTop ? " ".repeat(bean.length) : bean}a tiny bean drifting through the room`,
       ),
       { color: theme.accent },
-    );
-    this.writeStaticRow(
-      session,
-      4,
-      ruleBorder(cols, " activity feed  ·  say hello  ·  stay awhile "),
-      {
-        color: theme.border,
-      },
     );
   }
 
@@ -627,10 +657,7 @@ export class TerminalRenderer {
         const current = this.beanAnimations.get(session.shell);
         if (current === undefined) return;
         current.atTop = !current.atTop;
-        // Hide cursor (\x1b[?25l) before moving to header, draw header, restore prompt position, then show cursor (\x1b[?25h)
-        this.write(session.shell, "\x1b[?25l");
         this.refreshFrameHeader(session);
-        this.write(session.shell, "\x1b[?25h");
       }, 700),
     };
     this.beanAnimations.set(session.shell, animation);
