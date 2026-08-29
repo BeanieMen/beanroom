@@ -861,7 +861,7 @@ export class InputHandler {
       const message = this.session.inputBuffer.trim();
       this.session.inputBuffer = "";
       if (message.length > 0) this.onSubmit(message);
-      else this.session.renderer.renderPrompt(this.session);
+      this.session.renderer.renderPrompt(this.session);
       return;
     }
     if (character === "\x7f" || character === "\x08") {
