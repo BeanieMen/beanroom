@@ -36,6 +36,7 @@ You do not need to explore randomly. Here is exactly what each important file do
 This is the entry point.
 
 It:
+
 - reads host SSH keys (`ssh_host_ed25519_key`)
 - initializes the global `ChatRoom` instance
 - starts the SSH server listening on configured host/port
@@ -50,6 +51,7 @@ You usually do not need to modify this unless changing server lifecycle or liste
 Handles raw SSH connection lifecycle and session setup.
 
 It:
+
 - authenticates incoming SSH client connections
 - sets up terminal dimensions (pty window resizing)
 - attaches input/output streams to user sessions
@@ -62,6 +64,7 @@ It:
 This is the core chat management system.
 
 It handles:
+
 - managing active channels (`#general`, etc.)
 - routing messages between connected user sessions
 - broadcast notifications (user join, leave, rename)
@@ -76,10 +79,12 @@ Most chat-related features will involve these files.
 This folder contains chat command handlers (e.g. `/join`, `/login`, `/register`, `/theme`, `/whoami`, `/help`).
 
 It handles:
+
 - `handler.ts`: Parses command lines starting with `/` and dispatches them to specific command implementations
 - command files: execute actions like switching channels, registering users, or customizing terminal themes
 
 You touch this if:
+
 - adding a new Slash command
 - changing behavior of existing commands
 
@@ -90,11 +95,13 @@ You touch this if:
 Handles terminal rendering and TUI display logic.
 
 It handles:
+
 - ANSI escape codes and terminal cursor management
 - rendering chat messages, status bars, and input prompts
 - terminal resizing recalculations
 
 You touch this if:
+
 - modifying terminal UI visuals
 - fixing layout or rendering glitches
 
@@ -105,11 +112,13 @@ You touch this if:
 Contains shared TypeScript types.
 
 Files:
+
 - `session.ts`: Defines `UserSession` and active connection state
 - `user.ts`: Defines user data profiles and authentication models
 - `chat.ts`: Defines chat message payload structures
 
 Safe to modify if:
+
 - adding new structured fields to sessions, users, or messages
 
 ---
@@ -141,6 +150,7 @@ Adds user session to default channel (e.g. `#general`). Historical messages are 
 ### Step 4: Handle User Input
 
 Input stream is monitored:
+
 - If input starts with `/`, it passes to `src/commands/handler.ts`.
 - Otherwise, it is treated as a chat message and broadcasted via `src/chat/channel.ts`.
 
@@ -212,6 +222,7 @@ Failing to catch stream errors or async database/storage operations can crash th
 ### Step 1: Pick a small change
 
 Examples:
+
 - add a new simple command (e.g., `/ping` or `/roll`)
 - fix a terminal display glitch
 - improve error messages
@@ -239,6 +250,7 @@ bun run lint
 ### Step 4: Open Pull Request
 
 Explain:
+
 - what you changed
 - why you changed it
 
@@ -275,6 +287,7 @@ It is better to discuss than to break core behavior.
 You do not need to understand the entire codebase to contribute.
 
 Focus on:
+
 - the session pipeline
 - one component or command at a time
 

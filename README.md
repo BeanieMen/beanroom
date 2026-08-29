@@ -13,18 +13,18 @@ also: be nice. that's the first rule. just be a good human being.
 ## features
 
 - **TUI** — Full terminal buffer usage so as to not just be like a command but a proper hecking chatroom
-- **channels** — channels like #general (totally not from discord) 
+- **channels** — channels like #general (totally not from discord)
 - **themes** — `tokyo-night` and `gruvbox` are made for now
 
 ## try it live
-
 
 ```sh
 ssh beanoni.xyz -p 2222
 ```
 
 # technologia
-I used `ssh2` library with `gradient-string` for gradients. 
+
+I used `ssh2` library with `gradient-string` for gradients.
 
 | command                         | what it does                                     |
 | ------------------------------- | ------------------------------------------------ |
@@ -42,11 +42,9 @@ I used `ssh2` library with `gradient-string` for gradients.
 | `/clear`                        | clear the screen                                 |
 | `/help`                         | show the help text                               |
 
-
 ## contributing
 
 bug reports, ideas, and silly channel names are all welcome — check [CONTRIBUTING.md](CONTRIBUTING.md) first. this project follows the [Hack Club Code of Conduct](https://hackclub.com/conduct) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
 
 ## ai disclosure
 

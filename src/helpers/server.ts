@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   Server,
   type AuthContext,
@@ -24,7 +26,6 @@ import {
 
 import type { ChatRoom } from "../chat/chatroom.js";
 import type { UserSession } from "../types/session.js";
-import { createHash } from "crypto";
 
 export function createSshServer(
   hostKeys: Buffer[],
@@ -39,12 +40,9 @@ export function createSshServer(
       try {
         const publicKey = context as AuthContext & {
           username: string;
-          key: { data: Buffer };
+          key?: { data?: Buffer };
         };
-        console.log(publicKey);
-        const identity = publicKey.key?.data
-          ? publicKey.key.data
-          : Buffer.from(`${publicKey.username}:${info.ip}`);
+        const identity = publicKey.key?.data ?? Buffer.from(`${publicKey.username}:${info.ip}`);
 
         machineName = getCombinedUsername(
           publicKey.username,

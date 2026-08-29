@@ -3,7 +3,7 @@ import { logger } from "../helpers/logger.js";
 import { ChatRoomChannel } from "./channel.js";
 import { HistoryService } from "./history.js";
 
-import type { UserSession } from "../types/session.js";
+import type { PopupModal, UserSession } from "../types/session.js";
 
 export class ChatRoom {
   private readonly sessions = new Map<string, UserSession>();
@@ -79,7 +79,7 @@ export class ChatRoom {
   }
 
   /** Send a popup modal to a specific user session or broadcast to all active sessions in the chatroom */
-  broadcastPopup(popup: import("../types/session.js").PopupModal, targetSessionId?: string): void {
+  broadcastPopup(popup: PopupModal, targetSessionId?: string): void {
     const targetChannels = [...this.channels.values()];
     const sessionsSeen = new Set<string>();
     for (const channel of targetChannels) {

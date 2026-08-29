@@ -23,7 +23,7 @@ export class ChatRoomChannel {
       `[channel:${this.name}] join session=${user.id} user=${user.user.name} (members=${this.sesssions.size})`,
     );
 
-    this.replayHistory(user);
+    user.renderer.redraw(user);
     this.announce(`${user.user.name} has joined ${this.name}.`, user.id);
     logger.debug(`[channel:${this.name}] join finished for ${user.user.name}`);
     user.renderer.renderPrompt(user);
@@ -140,7 +140,7 @@ export class ChatRoomChannel {
     }
   }
 
-  private replayHistory(user: UserSession): void {
+  replayHistory(user: UserSession, skipPopup = false): void {
     const entries = this.history.recent(APP_CONFIG.historyLimit);
     logger.debug(
       `[channel:${this.name}] replayHistory for ${user.user.name}: ${entries.length} entries`,
@@ -149,9 +149,12 @@ export class ChatRoomChannel {
       const timestamp = formatTimestamp(new Date(entry.timestamp));
 
       if (entry.sender === "system") {
-        user.renderer.writeLine(user, `${timestamp} ${entry.message}`, {
-          color: UI_THEMES[user.theme].muted,
-        });
+        user.renderer.writeLine(
+          user,
+          `${timestamp} ${entry.message}`,
+          { color: UI_THEMES[user.theme].muted },
+          skipPopup,
+        );
         continue;
       }
 
@@ -161,6 +164,7 @@ export class ChatRoomChannel {
         entry.message,
         getUsernameColor(entry.sender),
         timestamp,
+        skipPopup,
       );
     }
   }

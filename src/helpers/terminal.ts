@@ -140,20 +140,20 @@ export class TerminalRenderer {
     this.redraw(session);
   }
 
-  writeLine(session: UserSession, text: string, style: TextStyle = {}): void {
+  writeLine(session: UserSession, text: string, style: TextStyle = {}, skipPopup = false): void {
     if (session.channelList !== null) return;
     if (this.hasFramedLayout(session)) {
       this.withMessageCursor(session, () => {
         this.writeFramedParts(session, [{ text, style }]);
       });
-      if (session.activePopup !== null) this.renderPopup(session);
+      if (!skipPopup && session.activePopup !== null) this.renderPopup(session);
       return;
     }
     this.withMessageCursor(session, () => {
       this.writeStyled(session, text, style);
       this.write(session.shell, "\r\n");
     });
-    if (session.activePopup !== null) this.renderPopup(session);
+    if (!skipPopup && session.activePopup !== null) this.renderPopup(session);
   }
 
   writeUserMessage(
@@ -162,14 +162,19 @@ export class TerminalRenderer {
     message: string,
     senderGradient: [string, string],
     timestamp: string,
+    skipPopup = false,
   ): void {
     if (session.channelList !== null) return;
-    this.writePartsLine(session, [
-      { text: `${timestamp} `, style: { color: this.theme(session).muted } },
-      { text: sender, style: { gradient: senderGradient } },
-      { text: " > " },
-      { text: message, style: { color: this.theme(session).foreground } },
-    ]);
+    this.writePartsLine(
+      session,
+      [
+        { text: `${timestamp} `, style: { color: this.theme(session).muted } },
+        { text: sender, style: { gradient: senderGradient } },
+        { text: " > " },
+        { text: message, style: { color: this.theme(session).foreground } },
+      ],
+      skipPopup,
+    );
   }
 
   renderPrompt(session: UserSession): void {
@@ -219,6 +224,9 @@ export class TerminalRenderer {
     this.applyScreenTheme(session);
     if (this.hasFramedLayout(session)) this.drawFrame(session);
     this.setScrollRegion(session);
+    if (session.currentChannel !== null) {
+      session.currentChannel.replayHistory(session, true);
+    }
     this.renderPrompt(session);
     if (session.activePopup !== null) {
       this.renderPopup(session);
@@ -281,17 +289,23 @@ export class TerminalRenderer {
     this.write(session.shell, `\x1b[${String(top)};${String(bottom)}r`);
   }
 
-  writePartsLine(session: UserSession, parts: { text: string; style?: TextStyle }[]): void {
+  writePartsLine(
+    session: UserSession,
+    parts: { text: string; style?: TextStyle }[],
+    skipPopup = false,
+  ): void {
     if (this.hasFramedLayout(session)) {
       this.withMessageCursor(session, () => {
         this.writeFramedParts(session, parts);
       });
+      if (!skipPopup && session.activePopup !== null) this.renderPopup(session);
       return;
     }
     this.withMessageCursor(session, () => {
       for (const part of parts) this.writePart(session, part.text, part.style);
       this.write(session.shell, "\r\n");
     });
+    if (!skipPopup && session.activePopup !== null) this.renderPopup(session);
   }
 
   private renderComposer(session: UserSession): void {
@@ -407,9 +421,14 @@ export class TerminalRenderer {
     this.writeStaticRow(session, footerTop, ruleBorder(cols, " ↑/↓ or j/k to move "), {
       color: theme.border,
     });
-    this.writeStaticRow(session, footerTop + 1, boxBorder(cols, " enter joins  ·  q / esc returns to chat "), {
-      color: theme.highlight,
-    });
+    this.writeStaticRow(
+      session,
+      footerTop + 1,
+      boxBorder(cols, " enter joins  ·  q / esc returns to chat "),
+      {
+        color: theme.highlight,
+      },
+    );
     this.writeStaticRow(session, rows, `╰${"─".repeat(Math.max(0, cols - 2))}╯`, {
       color: theme.border,
     });
@@ -472,7 +491,7 @@ export class TerminalRenderer {
     // Calculate dimensions
     const maxWidth = Math.max(30, cols - 6);
     const boxWidth = Math.min(68, maxWidth);
-    
+
     // Wrap popup body lines to fit inside box
     const innerWidth = boxWidth - 4; // 2 padding/border each side
     const wrappedLines: { text: string; indent?: boolean }[] = [];
@@ -491,7 +510,7 @@ export class TerminalRenderer {
             currentLine = word;
           }
         } else if (visibleWidth(currentLine) + 1 + visibleWidth(word) <= innerWidth) {
-          currentLine += " " + word;
+          currentLine += ` ${word}`;
         } else {
           wrappedLines.push({ text: currentLine });
           currentLine = word;
@@ -502,7 +521,7 @@ export class TerminalRenderer {
       }
     }
 
-    const headerHeight = (popup.author || popup.timeAgo) ? 2 : 1;
+    const headerHeight = popup.author || popup.timeAgo ? 2 : 1;
     const footerHeight = popup.controlsHint ? 2 : 1;
     const contentHeight = wrappedLines.length;
     const boxHeight = headerHeight + contentHeight + footerHeight + 1; // +1 top border
@@ -523,7 +542,10 @@ export class TerminalRenderer {
       const timePart = popup.timeAgo ? ` ${popup.timeAgo}` : "";
       const metaText = `${authorPart}${timePart}`;
       const headerLine = boxBorder(boxWidth, metaText);
-      this.writeAt(session, startRow + currentOffset, startCol, headerLine, { color: theme.highlight, fillBg: true });
+      this.writeAt(session, startRow + currentOffset, startCol, headerLine, {
+        color: theme.highlight,
+        fillBg: true,
+      });
       currentOffset += 1;
     }
 
@@ -533,7 +555,7 @@ export class TerminalRenderer {
       const isBullet = lineStr.trim().startsWith("•") || lineStr.trim().startsWith("-");
       const isCommand = lineStr.trim().startsWith("/");
       const color = isBullet || isCommand ? theme.warm : theme.foreground;
-      
+
       const formatted = boxBorder(boxWidth, lineStr);
       this.writeAt(session, startRow + currentOffset, startCol, formatted, { color, fillBg: true });
       currentOffset += 1;
@@ -542,7 +564,10 @@ export class TerminalRenderer {
     // Controls hint
     if (popup.controlsHint) {
       const hintLine = ruleBorder(boxWidth, ` ${popup.controlsHint} `);
-      this.writeAt(session, startRow + currentOffset, startCol, hintLine, { color: theme.muted, fillBg: true });
+      this.writeAt(session, startRow + currentOffset, startCol, hintLine, {
+        color: theme.muted,
+        fillBg: true,
+      });
       currentOffset += 1;
     }
 
