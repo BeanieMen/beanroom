@@ -1,4 +1,5 @@
 import { authService } from "../helpers/auth.js";
+import { getUsernameColor } from "../helpers/terminal.js";
 
 import { reply } from "./output.js";
 
@@ -22,6 +23,9 @@ export default async function command(session: UserSession, args: string[]): Pro
 
   try {
     const result = await authService.register(username, password);
+    if (result.includes("registered successfully")) {
+      session.usernameGradient = getUsernameColor(username);
+    }
     reply(session, result);
   } catch {
     reply(session, "Registration failed. Please try again.");

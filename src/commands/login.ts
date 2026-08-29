@@ -1,4 +1,5 @@
 import { authService } from "../helpers/auth.js";
+import { getUsernameColor } from "../helpers/terminal.js";
 
 import { reply } from "./output.js";
 
@@ -29,9 +30,7 @@ export default async function command(session: UserSession, args: string[]): Pro
     session.user.login(result.username);
 
     const saved = authService.getColorPreference(result.username);
-    if (saved !== undefined) {
-      session.usernameGradient = saved;
-    }
+    session.usernameGradient = saved ?? getUsernameColor(result.username);
 
     reply(session, result.message);
   } catch {

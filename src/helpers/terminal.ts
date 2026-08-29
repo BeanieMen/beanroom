@@ -1,5 +1,3 @@
-import gradient from "gradient-string";
-
 import { UI_THEMES, type UiThemeName } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -7,7 +5,6 @@ import type { ColorSupportLevel } from "../types/chat.js";
 import type { PopupModal, UserSession } from "../types/session.js";
 import type { ServerChannel } from "ssh2";
 
-const ESC = "\x1b";
 const ALT_BUFFER_ENTER = "\x1b[?1049h";
 const ALT_BUFFER_LEAVE = "\x1b[?1049l";
 const RESET = "\x1b[0m";
@@ -885,20 +882,56 @@ function colorText(text: string, color: string | undefined, level: ColorSupportL
 }
 
 function colorGradient(text: string, colors: readonly string[], level: ColorSupportLevel): string {
-  if (level === 0) return text;
-  const rendered = gradient([...colors])(text);
-  if (level === 3) return rendered;
-  return rendered.replace(
-    new RegExp(`${ESC}\\x5b38;2;(\\d+);(\\d+);(\\d+)m`, "g"),
-    (_match, red: string, green: string, blue: string) => {
-      const r = Number(red);
-      const g = Number(green);
-      const b = Number(blue);
-      return level === 2
-        ? `\x1b[38;5;${String(rgbTo256(r, g, b))}m`
-        : `\x1b[${String(rgbTo16(r, g, b))}m`;
-    },
-  );
+  if (level === 0 || text.length === 0 || colors.length === 0) return text;
+
+  const rgbColors = colors.map((color) => hexToRgb(color));
+  if (rgbColors.length === 1) {
+    return colorText(text, colors[0], level);
+  }
+
+  const characters = Array.from(text);
+  const total = characters.length;
+  if (total === 1) {
+    const [r, g, b] = rgbColors[0] ?? [255, 255, 255];
+    return formatAnsiColor(characters[0] ?? "", r, g, b, level);
+  }
+
+  let result = "";
+  const numSegments = rgbColors.length - 1;
+
+  for (let index = 0; index < total; index += 1) {
+    const position = index / (total - 1);
+    const scaledPosition = position * numSegments;
+    const segmentIndex = Math.min(Math.floor(scaledPosition), numSegments - 1);
+    const segmentPosition = scaledPosition - segmentIndex;
+
+    const [r1, g1, b1] = rgbColors[segmentIndex] ?? [255, 255, 255];
+    const [r2, g2, b2] = rgbColors[segmentIndex + 1] ?? [255, 255, 255];
+
+    const red = Math.round(r1 + (r2 - r1) * segmentPosition);
+    const green = Math.round(g1 + (g2 - g1) * segmentPosition);
+    const blue = Math.round(b1 + (b2 - b1) * segmentPosition);
+
+    result += formatAnsiColor(characters[index] ?? "", red, green, blue, level);
+  }
+
+  return result;
+}
+
+function formatAnsiColor(
+  character: string,
+  red: number,
+  green: number,
+  blue: number,
+  level: ColorSupportLevel,
+): string {
+  if (level === 3) {
+    return `\x1b[38;2;${String(red)};${String(green)};${String(blue)}m${character}`;
+  }
+  if (level === 2) {
+    return `\x1b[38;5;${String(rgbTo256(red, green, blue))}m${character}`;
+  }
+  return `\x1b[${String(rgbTo16(red, green, blue))}m${character}`;
 }
 
 function hexToRgb(color: string): [number, number, number] {

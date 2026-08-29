@@ -1,3 +1,4 @@
+import { authService } from "../helpers/auth.js";
 import { APP_CONFIG, UI_THEMES } from "../helpers/config.js";
 import { logger } from "../helpers/logger.js";
 import { formatTimestamp, getUsernameColor } from "../helpers/terminal.js";
@@ -158,11 +159,14 @@ export class ChatRoomChannel {
         continue;
       }
 
+      const senderColor =
+        authService.getColorPreference(entry.sender) ?? getUsernameColor(entry.sender);
+
       user.renderer.writeUserMessage(
         user,
         entry.sender,
         entry.message,
-        getUsernameColor(entry.sender),
+        senderColor,
         timestamp,
         skipPopup,
       );
