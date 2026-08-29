@@ -1,9 +1,3 @@
-```
-╔══════════════════╗
-║     BEANROOM     ║
-╚══════════════════╝
-```
-
 # beanroom 🫘
 
 > a little anon chatroom that keyboard only typa project. you just `ssh` in and start talking to strangers (scawy).
